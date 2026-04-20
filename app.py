@@ -706,16 +706,7 @@ if run_button:
             }), use_container_width=True, hide_index=True)
 
             st.markdown("#### 🗂️ Account Categorisation")
-            seg    = segmentation.get('customer_segment', 'N/A')
-            colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(seg, "⚪")
-            st.dataframe(pd.DataFrame({
-                "Field": [
-                    "Customer Segment",
-                    "Segment Rationale",
-                    "Account Category",
-                    "Account Category Note",
-                    "Secondary Account Owner"
-                           st.markdown("#### 🗂️ Account Categorisation")
+          
             seg    = segmentation.get('customer_segment', 'N/A')
             colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(seg, "⚪")
             st.dataframe(pd.DataFrame({
