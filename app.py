@@ -715,10 +715,29 @@ if run_button:
                     "Account Category",
                     "Account Category Note",
                     "Secondary Account Owner"
+                           st.markdown("#### 🗂️ Account Categorisation")
+            seg    = segmentation.get('customer_segment', 'N/A')
+            colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(seg, "⚪")
+            st.dataframe(pd.DataFrame({
+                "Field": [
+                    "Customer Segment",
+                    "Segment Rationale",
+                    "Account Category",
+                    "Account Category Note",
+                    "Secondary Account Owner"
                 ],
                 "Value": [
                     f"{colour} {seg}",
                     segmentation.get('customer_segment_rationale', 'N/A'),
                     segmentation.get('account_category', 'N/A'),
                     segmentation.get('account_category_note', 'N/A'),
-                    segmentation.get('secondary_account_owner', 'N](#)
+                    segmentation.get('secondary_account_owner', 'N/A'),
+                ]
+            }), use_container_width=True, hide_index=True)
+
+        with st.expander("🔍 View raw web search results (for manual review)"):
+            for i, item in enumerate(research.get('snippets', []), 1):
+                st.markdown(f"**Result {i}** — _{item['query']}_")
+                st.write(f"Source: {item['source']}")
+                st.write(item['snippet'])
+                st.divider()
