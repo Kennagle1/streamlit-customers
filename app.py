@@ -874,6 +874,8 @@ with tab2:
 # ===============================================
 with tab3:
     st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
+    NO_VALUE_PLACEHOLDER = "—"
+    HIGH_CONFIDENCE_THRESHOLD = 80
 
     st.markdown("""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
@@ -971,9 +973,9 @@ with tab3:
                     results.append({
                         "New Customer Name": new_name,
                         "Primary Match": primary_name,
-                        "Confidence Score (%)": primary_score if primary_score is not None else "—",
-                        "Secondary Match": secondary_name if secondary_name else "—",
-                        "Secondary Confidence (%)": secondary_score if secondary_score is not None else "—",
+                        "Confidence Score (%)": primary_score if primary_score is not None else NO_VALUE_PLACEHOLDER,
+                        "Secondary Match": secondary_name if secondary_name else NO_VALUE_PLACEHOLDER,
+                        "Secondary Confidence (%)": secondary_score if secondary_score is not None else NO_VALUE_PLACEHOLDER,
                     })
 
                     if (i + 1) % max(1, total // 20) == 0 or i == total - 1:
@@ -985,12 +987,14 @@ with tab3:
 
                 matched = results_df[results_df["Primary Match"] != "No match found"]
                 unmatched = results_df[results_df["Primary Match"] == "No match found"]
-                high_conf = matched[pd.to_numeric(matched["Confidence Score (%)"], errors='coerce') >= 80]
+                high_conf = matched[
+                    pd.to_numeric(matched["Confidence Score (%)"], errors='coerce') >= HIGH_CONFIDENCE_THRESHOLD
+                ]
 
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                 col_m1.metric("Total New Customers", total)
                 col_m2.metric("Matched", len(matched))
-                col_m3.metric("High Confidence (≥80%)", len(high_conf))
+                col_m3.metric(f"High Confidence (≥{HIGH_CONFIDENCE_THRESHOLD}%)", len(high_conf))
                 col_m4.metric("No Match Found", len(unmatched))
 
                 st.divider()
@@ -1008,16 +1012,16 @@ with tab3:
                     except (ValueError, TypeError):
                         return ''
 
-                styled_df = results_df.style.applymap(
+                styled_df = results_df.style.map(
                     highlight_confidence,
                     subset=["Confidence Score (%)"]
                 )
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
                 export_df = results_df.copy()
-                export_df["Confidence Score (%)"] = export_df["Confidence Score (%)"].replace("—", "")
-                export_df["Secondary Confidence (%)"] = export_df["Secondary Confidence (%)"].replace("—", "")
-                export_df["Secondary Match"] = export_df["Secondary Match"].replace("—", "")
+                export_df["Confidence Score (%)"] = export_df["Confidence Score (%)"].replace(NO_VALUE_PLACEHOLDER, "")
+                export_df["Secondary Confidence (%)"] = export_df["Secondary Confidence (%)"].replace(NO_VALUE_PLACEHOLDER, "")
+                export_df["Secondary Match"] = export_df["Secondary Match"].replace(NO_VALUE_PLACEHOLDER, "")
 
                 csv_buffer = io.StringIO()
                 export_df.to_csv(csv_buffer, index=False)
