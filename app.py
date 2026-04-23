@@ -892,6 +892,7 @@ with tab3:
     st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
     NO_VALUE_PLACEHOLDER = "—"
     HIGH_CONFIDENCE_THRESHOLD = 80
+    MAX_TOP_MATCHES_TO_CONSIDER = 10
 
     st.markdown("""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
@@ -1002,6 +1003,18 @@ with tab3:
 
             if run_matching:
                 new_names = new_customers_df[name_column].dropna().astype(str).tolist()
+                new_customer_country_map = {}
+                if new_customer_country_col:
+                    country_df = new_customers_df[[name_column, new_customer_country_col]].drop_duplicates(
+                        subset=[name_column],
+                        keep="first"
+                    )
+                    for _, country_row in country_df.iterrows():
+                        row_name = str(country_row.get(name_column, "")).strip()
+                        row_country = country_row.get(new_customer_country_col, "")
+                        if row_name and pd.notna(row_country):
+                            new_customer_country_map[row_name] = str(row_country).strip().lower()
+
                 match_columns = []
                 for col in [sf_account_name_col, sf_legal_name_col]:
                     if col and col not in match_columns:
@@ -1056,21 +1069,21 @@ with tab3:
                                     sf_country_val = str(raw).strip() if pd.notna(raw) else ""
                                 top_matches.append((row_best_score, row_display_name, sf_country_val))
 
-                    top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:10]
+                    top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:MAX_TOP_MATCHES_TO_CONSIDER]
+                    new_cust_country = new_customer_country_map.get(str(new_name).strip(), "")
 
                     if top_matches:
-                        new_cust_country = ""
-                        if new_customer_country_col:
-                            raw_nc = new_customers_df.loc[new_customers_df[name_column] == new_name, new_customer_country_col]
-                            if not raw_nc.empty and pd.notna(raw_nc.iloc[0]):
-                                new_cust_country = str(raw_nc.iloc[0]).strip().lower()
-
                         eligible = [(s, n, c) for s, n, c in top_matches if s >= confidence_threshold]
 
                         if eligible and new_cust_country:
-                            def country_matches(sf_c):
-                                return 1 if sf_c.strip().lower() == new_cust_country else 0
-                            eligible = sorted(eligible, key=lambda x: (country_matches(x[2]), x[0]), reverse=True)
+                            eligible = sorted(
+                                eligible,
+                                key=lambda x: (
+                                    1 if str(x[2] or "").strip().lower() == new_cust_country else 0,
+                                    x[0]
+                                ),
+                                reverse=True
+                            )
 
                         primary_sf_country = ""
                         secondary_name = ""
@@ -1091,7 +1104,6 @@ with tab3:
                                 primary_sf_country = ""
                                 primary_score = None
                     else:
-                        new_cust_country = ""
                         primary_name = "No match found"
                         primary_score = None
                         primary_sf_country = ""
