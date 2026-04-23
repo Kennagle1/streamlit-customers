@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 from duckduckgo_search import DDGS
+from rapidfuzz import fuzz, process
 from datetime import datetime
+import io
 import re
 
 # -----------------------------------------------
@@ -667,7 +669,7 @@ def apply_segmentation(research_data, account_name="", region="", country=""):
 # -----------------------------------------------
 # TABS
 # -----------------------------------------------
-tab1, tab2, tab3 = st.tabs(["Customer Attributes", "Lead Matching", "ICP Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs(["Customer Attributes", "Lead Matching", "Account Matching", "ICP Analysis"])
 
 # ===============================================
 # TAB 1 — CUSTOMER ATTRIBUTES
@@ -868,9 +870,183 @@ with tab2:
     """, unsafe_allow_html=True)
 
 # ===============================================
-# TAB 3 — ICP ANALYSIS (placeholder)
+# TAB 3 — ACCOUNT MATCHING
 # ===============================================
 with tab3:
+    st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
+    NO_VALUE_PLACEHOLDER = "—"
+    HIGH_CONFIDENCE_THRESHOLD = 80
+
+    st.markdown("""
+    Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
+    The tool will fuzzy-match each name against the **Salesforce Accounts CSV** uploaded in the sidebar,  
+    returning a confidence score, a primary suggested match, and a secondary match where applicable.
+    """)
+
+    new_customer_file = st.file_uploader(
+        "Upload New Customer File (CSV or Excel)",
+        type=["csv", "xlsx", "xls"],
+        key="account_matching_upload"
+    )
+
+    if new_customer_file is not None:
+        try:
+            if new_customer_file.name.endswith(('.xlsx', '.xls')):
+                new_customers_df = pd.read_excel(new_customer_file)
+            else:
+                new_customers_df = pd.read_csv(new_customer_file)
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+            st.stop()
+
+        name_col_candidates = [c for c in new_customers_df.columns if any(
+            kw in c.lower() for kw in ['name', 'account', 'customer', 'company', 'organisation', 'organization']
+        )]
+        if name_col_candidates:
+            default_col = name_col_candidates[0]
+        else:
+            default_col = new_customers_df.columns[0]
+
+        name_column = st.selectbox(
+            "Select the column containing customer names:",
+            options=new_customers_df.columns.tolist(),
+            index=new_customers_df.columns.tolist().index(default_col)
+        )
+
+        st.info(f"📋 Loaded **{len(new_customers_df)}** new customers from uploaded file.")
+
+        if sf_accounts is None:
+            st.warning("⚠️ No Salesforce Accounts CSV uploaded. Please upload it in the sidebar first.")
+        else:
+            sf_name_col_candidates = [c for c in sf_accounts.columns if any(
+                kw in c.lower() for kw in ['account name', 'name', 'account', 'company']
+            )]
+            sf_name_col = sf_name_col_candidates[0] if sf_name_col_candidates else sf_accounts.columns[0]
+
+            confidence_threshold = st.slider(
+                "Minimum confidence threshold to show a match (%)",
+                min_value=0, max_value=100, value=60, step=5,
+                help="Matches below this threshold will be marked as 'No match found'"
+            )
+
+            run_matching = st.button("▶ Run Account Matching", type="primary", use_container_width=True)
+
+            if run_matching:
+                sf_names = sf_accounts[sf_name_col].dropna().astype(str).tolist()
+                new_names = new_customers_df[name_column].dropna().astype(str).tolist()
+
+                results = []
+                progress = st.progress(0, text="Matching accounts...")
+
+                total = len(new_names)
+                for i, new_name in enumerate(new_names):
+                    matches = process.extract(
+                        new_name,
+                        sf_names,
+                        scorer=fuzz.WRatio,
+                        limit=2
+                    )
+
+                    if matches:
+                        primary = matches[0]
+                        primary_name = primary[0]
+                        primary_score = round(primary[1], 1)
+
+                        if primary_score < confidence_threshold:
+                            primary_name = "No match found"
+                            primary_score = None
+
+                        secondary_name = ""
+                        secondary_score = None
+                        if len(matches) > 1:
+                            sec = matches[1]
+                            sec_score = round(sec[1], 1)
+                            if sec_score >= confidence_threshold and primary_name != "No match found":
+                                secondary_name = sec[0]
+                                secondary_score = sec_score
+                    else:
+                        primary_name = "No match found"
+                        primary_score = None
+                        secondary_name = ""
+                        secondary_score = None
+
+                    results.append({
+                        "New Customer Name": new_name,
+                        "Primary Match": primary_name,
+                        "Confidence Score (%)": primary_score if primary_score is not None else NO_VALUE_PLACEHOLDER,
+                        "Secondary Match": secondary_name if secondary_name else NO_VALUE_PLACEHOLDER,
+                        "Secondary Confidence (%)": secondary_score if secondary_score is not None else NO_VALUE_PLACEHOLDER,
+                    })
+
+                    if (i + 1) % max(1, total // 20) == 0 or i == total - 1:
+                        progress.progress((i + 1) / total, text=f"Matching accounts... {i+1}/{total}")
+
+                progress.empty()
+
+                results_df = pd.DataFrame(results)
+
+                matched = results_df[results_df["Primary Match"] != "No match found"]
+                unmatched = results_df[results_df["Primary Match"] == "No match found"]
+                high_conf = matched[
+                    pd.to_numeric(matched["Confidence Score (%)"], errors='coerce') >= HIGH_CONFIDENCE_THRESHOLD
+                ]
+
+                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                col_m1.metric("Total New Customers", total)
+                col_m2.metric("Matched", len(matched))
+                col_m3.metric(f"High Confidence (≥{HIGH_CONFIDENCE_THRESHOLD}%)", len(high_conf))
+                col_m4.metric("No Match Found", len(unmatched))
+
+                st.divider()
+                st.markdown('<p class="fen-section-title">Matching Results</p>', unsafe_allow_html=True)
+
+                def highlight_confidence(val):
+                    try:
+                        v = float(val)
+                        if v >= 90:
+                            return 'background-color: #d4edda; color: #155724'
+                        elif v >= 70:
+                            return 'background-color: #fff3cd; color: #856404'
+                        else:
+                            return 'background-color: #f8d7da; color: #721c24'
+                    except (ValueError, TypeError):
+                        return ''
+
+                styled_df = results_df.style.map(
+                    highlight_confidence,
+                    subset=["Confidence Score (%)"]
+                )
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+                export_df = results_df.copy()
+                export_df["Confidence Score (%)"] = export_df["Confidence Score (%)"].replace(NO_VALUE_PLACEHOLDER, "")
+                export_df["Secondary Confidence (%)"] = export_df["Secondary Confidence (%)"].replace(NO_VALUE_PLACEHOLDER, "")
+                export_df["Secondary Match"] = export_df["Secondary Match"].replace(NO_VALUE_PLACEHOLDER, "")
+
+                csv_buffer = io.StringIO()
+                export_df.to_csv(csv_buffer, index=False)
+                csv_bytes = csv_buffer.getvalue().encode("utf-8")
+
+                st.download_button(
+                    label="⬇️ Download Results as CSV",
+                    data=csv_bytes,
+                    file_name="account_matching_results.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+    else:
+        st.markdown("""
+        <div class="placeholder-box">
+            <h3>Account Matching</h3>
+            <p>Upload a New Customer file above to begin.<br>
+            Ensure the Salesforce Accounts CSV is also loaded in the sidebar.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ===============================================
+# TAB 4 — ICP ANALYSIS (placeholder)
+# ===============================================
+with tab4:
     st.markdown("""
     <div class="placeholder-box">
         <h3>ICP Analysis</h3>

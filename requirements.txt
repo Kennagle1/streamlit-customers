@@ -2,3 +2,4 @@ streamlit
 pandas
 duckduckgo-search
 openpyxl
+rapidfuzz
