@@ -355,8 +355,8 @@ def normalize_name(name):
     return s
 
 def compute_match_score(new_norm, val_norm):
-    """Compute a fuzzy match score with guards against short-string inflation,
-    common financial stop-word token inflation, and country tiebreaker issues."""
+    """Compute a fuzzy match score with guards against short-string inflation
+    and common financial stop-word token inflation."""
     # Bug 1 guard: discard score when raw character-level similarity is too low
     char_ratio = difflib.SequenceMatcher(None, new_norm, val_norm).ratio()
     if char_ratio < 0.25:
@@ -367,7 +367,7 @@ def compute_match_score(new_norm, val_norm):
         fuzz.token_sort_ratio(new_norm, val_norm),
     ]
 
-    # Bug 3 guard: skip token_set_ratio for short strings (acronym inflation)
+    # Bug 3 guard: skip token_set_ratio for short strings to avoid partial-match inflation
     if len(new_norm) >= 5 and len(val_norm) >= 5:
         tsr = fuzz.token_set_ratio(new_norm, val_norm)
 
