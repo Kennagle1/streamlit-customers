@@ -996,6 +996,7 @@ with tab3:
                 for col in [sf_account_name_col, sf_reporting_group_col, sf_ultimate_parent_col, sf_legal_name_col]:
                     if col and col not in match_columns:
                         match_columns.append(col)
+                sf_records = sf_accounts.to_dict("records")
 
                 results = []
                 progress = st.progress(0, text="Matching accounts...")
@@ -1005,7 +1006,7 @@ with tab3:
                     new_norm = normalize_name(new_name)
                     top_matches = []
 
-                    for _, row in sf_accounts.iterrows():
+                    for row in sf_records:
                         row_best_score = None
                         row_fallback_display = ""
                         for col in match_columns:
