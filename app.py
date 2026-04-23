@@ -892,11 +892,12 @@ with tab3:
     st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
     NO_VALUE_PLACEHOLDER = "—"
     HIGH_CONFIDENCE_THRESHOLD = 80
+    MAX_TOP_MATCHES_TO_CONSIDER = 10
 
     st.markdown("""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
-    The tool will fuzzy-match each name against **Account Name**, **Reporting Group**, **Ultimate Parent**,  
-    and **Legal Name** in the **Salesforce Accounts CSV** uploaded in the sidebar,  
+    The tool will fuzzy-match each name against **Account Name** and **Legal Name**  
+    in the **Salesforce Accounts CSV** uploaded in the sidebar,  
     returning a confidence score, a primary suggested match, and a secondary match where applicable.
     """)
 
@@ -929,6 +930,19 @@ with tab3:
             options=new_customers_df.columns.tolist(),
             index=new_customers_df.columns.tolist().index(default_col)
         )
+
+        new_country_col_candidates = [c for c in new_customers_df.columns if 'country' in c.lower()]
+        new_customer_country_col_options = ["(none)"] + new_customers_df.columns.tolist()
+        default_country_idx = 0
+        if new_country_col_candidates:
+            default_country_idx = new_customer_country_col_options.index(new_country_col_candidates[0])
+        new_customer_country_col_raw = st.selectbox(
+            "Select the Country column in the New Customer file (optional — used to refine match suggestions):",
+            options=new_customer_country_col_options,
+            index=default_country_idx,
+            key="new_cust_country_col"
+        )
+        new_customer_country_col = new_customer_country_col_raw if new_customer_country_col_raw != "(none)" else None
 
         st.info(f"📋 Loaded **{len(new_customers_df)}** new customers from uploaded file.")
 
@@ -966,19 +980,16 @@ with tab3:
                     secondary_terms=['name', 'account'],
                     exclude_terms=['id']
                 )
-            sf_reporting_group_col = pick_col(primary_terms=['reporting group'], secondary_terms=['reporting'])
-            sf_ultimate_parent_col = pick_col(primary_terms=['ultimate parent'], secondary_terms=['parent'])
             sf_legal_name_col = pick_col(primary_terms=['legal name'], secondary_terms=['legal'])
+            sf_country_col = pick_col(primary_terms=['country'], secondary_terms=[])
 
             detected_columns = []
             if sf_account_name_col:
                 detected_columns.append(f'Account Name → "{sf_account_name_col}"')
-            if sf_reporting_group_col:
-                detected_columns.append(f'Reporting Group → "{sf_reporting_group_col}"')
-            if sf_ultimate_parent_col:
-                detected_columns.append(f'Ultimate Parent → "{sf_ultimate_parent_col}"')
             if sf_legal_name_col:
                 detected_columns.append(f'Legal Name → "{sf_legal_name_col}"')
+            if sf_country_col:
+                detected_columns.append(f'Country → "{sf_country_col}"')
             if detected_columns:
                 st.success(" | ".join(detected_columns))
 
@@ -992,8 +1003,20 @@ with tab3:
 
             if run_matching:
                 new_names = new_customers_df[name_column].dropna().astype(str).tolist()
+                new_customer_country_map = {}
+                if new_customer_country_col:
+                    country_df = new_customers_df[[name_column, new_customer_country_col]].drop_duplicates(
+                        subset=[name_column],
+                        keep="first"
+                    )
+                    for _, country_row in country_df.iterrows():
+                        row_name = str(country_row.get(name_column, "")).strip()
+                        row_country = country_row.get(new_customer_country_col, "")
+                        if row_name and pd.notna(row_country):
+                            new_customer_country_map[row_name] = str(row_country).strip().lower()
+
                 match_columns = []
-                for col in [sf_account_name_col, sf_reporting_group_col, sf_ultimate_parent_col, sf_legal_name_col]:
+                for col in [sf_account_name_col, sf_legal_name_col]:
                     if col and col not in match_columns:
                         match_columns.append(col)
                 sf_records = sf_accounts.to_dict("records")
@@ -1040,33 +1063,62 @@ with tab3:
                                 row_display_name = row_fallback_display
 
                             if row_display_name:
-                                top_matches.append((row_best_score, row_display_name))
+                                sf_country_val = ""
+                                if sf_country_col:
+                                    raw = row.get(sf_country_col, "")
+                                    sf_country_val = str(raw).strip() if pd.notna(raw) else ""
+                                top_matches.append((row_best_score, row_display_name, sf_country_val))
 
-                    top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:2]
+                    top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:MAX_TOP_MATCHES_TO_CONSIDER]
+                    new_cust_country = new_customer_country_map.get(str(new_name).strip(), "")
 
                     if top_matches:
-                        primary_score = round(top_matches[0][0], 1)
-                        primary_name = top_matches[0][1] if primary_score >= confidence_threshold else "No match found"
-                        if primary_name == "No match found":
-                            primary_score = None
+                        eligible = [(s, n, c) for s, n, c in top_matches if s >= confidence_threshold]
 
+                        if eligible and new_cust_country:
+                            eligible = sorted(
+                                eligible,
+                                key=lambda x: (
+                                    1 if str(x[2] or "").strip().lower() == new_cust_country else 0,
+                                    x[0]
+                                ),
+                                reverse=True
+                            )
+
+                        primary_sf_country = ""
                         secondary_name = ""
                         secondary_score = None
-                        if len(top_matches) > 1 and primary_name != "No match found":
-                            sec_score = round(top_matches[1][0], 1)
-                            if sec_score >= confidence_threshold:
-                                secondary_name = top_matches[1][1]
-                                secondary_score = sec_score
+                        if eligible:
+                            primary_score = round(eligible[0][0], 1)
+                            primary_name = eligible[0][1]
+                            primary_sf_country = eligible[0][2]
+                            if len(eligible) > 1:
+                                secondary_name = eligible[1][1]
+                                secondary_score = round(eligible[1][0], 1)
+                        else:
+                            primary_score = round(top_matches[0][0], 1)
+                            primary_name = top_matches[0][1] if primary_score >= confidence_threshold else "No match found"
+                            if primary_name != "No match found":
+                                primary_sf_country = top_matches[0][2]
+                            else:
+                                primary_sf_country = ""
+                                primary_score = None
                     else:
                         primary_name = "No match found"
                         primary_score = None
+                        primary_sf_country = ""
                         secondary_name = ""
                         secondary_score = None
+
+                    country_match_flag = ""
+                    if new_cust_country and primary_sf_country:
+                        country_match_flag = "✅" if primary_sf_country.strip().lower() == new_cust_country else "⬜"
 
                     results.append({
                         "New Customer Name": new_name,
                         "Primary Match": primary_name,
                         "Confidence Score (%)": primary_score if primary_score is not None else NO_VALUE_PLACEHOLDER,
+                        "Country Match": country_match_flag,
                         "Secondary Match": secondary_name if secondary_name else NO_VALUE_PLACEHOLDER,
                         "Secondary Confidence (%)": secondary_score if secondary_score is not None else NO_VALUE_PLACEHOLDER,
                     })
