@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from duckduckgo_search import DDGS
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 from datetime import datetime
 import io
 import re
@@ -330,6 +330,22 @@ def generate_name_variations(name):
         if key in name.lower():
             variations.extend(abbrevs)
     return list(set(variations))
+
+def normalize_name(name):
+    """Strip common legal entity suffixes and normalise whitespace for fuzzy matching."""
+    s = str(name).strip().lower()
+    s = re.sub(r'[.,\-]', ' ', s)
+    legal_suffixes = [
+        r'\bpty\s+ltd\b', r'\bpte\s+ltd\b', r'\bltd\b', r'\bllc\b', r'\binc\b',
+        r'\bcorp\b', r'\bcorporation\b', r'\bplc\b', r'\bag\b',
+        r'\bsrl\b', r'\bgmbh\b', r'\bbv\b', r'\bnv\b', r'\bspa\b',
+        r'\blimited\b', r'\bincorporated\b', r'\bholdings?\b',
+        r'\bco\b', r'\bcompany\b',
+    ]
+    for suffix in legal_suffixes:
+        s = re.sub(suffix, ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
 
 def check_duplicate(sf_accounts, account_name, region, country):
     if sf_accounts is None:
@@ -879,7 +895,8 @@ with tab3:
 
     st.markdown("""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
-    The tool will fuzzy-match each name against the **Salesforce Accounts CSV** uploaded in the sidebar,  
+    The tool will fuzzy-match each name against **Account Name**, **Reporting Group**, **Ultimate Parent**,  
+    and **Legal Name** in the **Salesforce Accounts CSV** uploaded in the sidebar,  
     returning a confidence score, a primary suggested match, and a secondary match where applicable.
     """)
 
@@ -918,10 +935,52 @@ with tab3:
         if sf_accounts is None:
             st.warning("⚠️ No Salesforce Accounts CSV uploaded. Please upload it in the sidebar first.")
         else:
-            sf_name_col_candidates = [c for c in sf_accounts.columns if any(
-                kw in c.lower() for kw in ['account name', 'name', 'account', 'company']
-            )]
-            sf_name_col = sf_name_col_candidates[0] if sf_name_col_candidates else sf_accounts.columns[0]
+            sf_columns = sf_accounts.columns.tolist()
+            sf_columns_lc = {c: c.lower() for c in sf_columns}
+
+            def pick_col(primary_terms, secondary_terms=None, exclude_terms=None):
+                secondary_terms = secondary_terms or []
+                exclude_terms = exclude_terms or []
+                candidates = [
+                    c for c in sf_columns
+                    if not any(ex in sf_columns_lc[c] for ex in exclude_terms)
+                ]
+                for term in primary_terms:
+                    for c in candidates:
+                        if term in sf_columns_lc[c]:
+                            return c
+                for term in secondary_terms:
+                    for c in candidates:
+                        if term in sf_columns_lc[c]:
+                            return c
+                return None
+
+            account_col_candidates = [c for c in sf_columns if 'id' not in sf_columns_lc[c]]
+            sf_account_name_col = next(
+                (c for c in account_col_candidates if sf_columns_lc[c].strip() == 'account name'),
+                None
+            )
+            if sf_account_name_col is None:
+                sf_account_name_col = pick_col(
+                    primary_terms=['account name'],
+                    secondary_terms=['name', 'account'],
+                    exclude_terms=['id']
+                )
+            sf_reporting_group_col = pick_col(primary_terms=['reporting group'], secondary_terms=['reporting'])
+            sf_ultimate_parent_col = pick_col(primary_terms=['ultimate parent'], secondary_terms=['parent'])
+            sf_legal_name_col = pick_col(primary_terms=['legal name'], secondary_terms=['legal'])
+
+            detected_columns = []
+            if sf_account_name_col:
+                detected_columns.append(f'Account Name → "{sf_account_name_col}"')
+            if sf_reporting_group_col:
+                detected_columns.append(f'Reporting Group → "{sf_reporting_group_col}"')
+            if sf_ultimate_parent_col:
+                detected_columns.append(f'Ultimate Parent → "{sf_ultimate_parent_col}"')
+            if sf_legal_name_col:
+                detected_columns.append(f'Legal Name → "{sf_legal_name_col}"')
+            if detected_columns:
+                st.success(" | ".join(detected_columns))
 
             confidence_threshold = st.slider(
                 "Minimum confidence threshold to show a match (%)",
@@ -932,37 +991,71 @@ with tab3:
             run_matching = st.button("▶ Run Account Matching", type="primary", use_container_width=True)
 
             if run_matching:
-                sf_names = sf_accounts[sf_name_col].dropna().astype(str).tolist()
                 new_names = new_customers_df[name_column].dropna().astype(str).tolist()
+                match_columns = []
+                for col in [sf_account_name_col, sf_reporting_group_col, sf_ultimate_parent_col, sf_legal_name_col]:
+                    if col and col not in match_columns:
+                        match_columns.append(col)
+                sf_records = sf_accounts.to_dict("records")
 
                 results = []
                 progress = st.progress(0, text="Matching accounts...")
 
                 total = len(new_names)
                 for i, new_name in enumerate(new_names):
-                    matches = process.extract(
-                        new_name,
-                        sf_names,
-                        scorer=fuzz.WRatio,
-                        limit=2
-                    )
+                    new_norm = normalize_name(new_name)
+                    top_matches = []
 
-                    if matches:
-                        primary = matches[0]
-                        primary_name = primary[0]
-                        primary_score = round(primary[1], 1)
+                    for row in sf_records:
+                        row_best_score = None
+                        row_fallback_display = ""
+                        for col in match_columns:
+                            val = row.get(col, "")
+                            if pd.isna(val):
+                                continue
+                            val_str = str(val).strip()
+                            if not val_str:
+                                continue
+                            if not row_fallback_display:
+                                row_fallback_display = val_str
 
-                        if primary_score < confidence_threshold:
-                            primary_name = "No match found"
+                            val_norm = normalize_name(val_str)
+                            if not new_norm or not val_norm:
+                                continue
+
+                            score = max(
+                                fuzz.WRatio(new_norm, val_norm),
+                                fuzz.token_sort_ratio(new_norm, val_norm),
+                                fuzz.token_set_ratio(new_norm, val_norm),
+                            )
+
+                            if row_best_score is None or score > row_best_score:
+                                row_best_score = score
+
+                        if row_best_score is not None:
+                            if sf_account_name_col:
+                                account_name_val = row.get(sf_account_name_col, "")
+                                row_display_name = str(account_name_val).strip() if pd.notna(account_name_val) else ""
+                            else:
+                                row_display_name = row_fallback_display
+
+                            if row_display_name:
+                                top_matches.append((row_best_score, row_display_name))
+
+                    top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:2]
+
+                    if top_matches:
+                        primary_score = round(top_matches[0][0], 1)
+                        primary_name = top_matches[0][1] if primary_score >= confidence_threshold else "No match found"
+                        if primary_name == "No match found":
                             primary_score = None
 
                         secondary_name = ""
                         secondary_score = None
-                        if len(matches) > 1:
-                            sec = matches[1]
-                            sec_score = round(sec[1], 1)
-                            if sec_score >= confidence_threshold and primary_name != "No match found":
-                                secondary_name = sec[0]
+                        if len(top_matches) > 1 and primary_name != "No match found":
+                            sec_score = round(top_matches[1][0], 1)
+                            if sec_score >= confidence_threshold:
+                                secondary_name = top_matches[1][1]
                                 secondary_score = sec_score
                     else:
                         primary_name = "No match found"
