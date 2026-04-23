@@ -5,6 +5,7 @@ from rapidfuzz import fuzz
 from datetime import datetime
 import io
 import re
+import difflib
 
 # -----------------------------------------------
 # PAGE CONFIG
@@ -213,6 +214,12 @@ VALID_DETAILED_SEGMENTS = [row[0] for row in SEGMENT_HIERARCHY]
 VALID_BUSINESS_SEGMENTS = list(dict.fromkeys(row[1] for row in SEGMENT_HIERARCHY))
 VALID_MARKET_SEGMENTS   = list(dict.fromkeys(row[2] for row in SEGMENT_HIERARCHY))
 
+FINANCIAL_STOP_WORDS = {
+    "bank", "financial", "group", "capital", "asset", "management",
+    "services", "solutions", "international", "global", "trust",
+    "investments", "partners", "advisory", "fund", "funds",
+}
+
 # -----------------------------------------------
 # G-SIB & D-SIB LISTS
 # -----------------------------------------------
@@ -346,6 +353,34 @@ def normalize_name(name):
         s = re.sub(suffix, ' ', s)
     s = re.sub(r'\s+', ' ', s).strip()
     return s
+
+def compute_match_score(new_norm, val_norm):
+    """Compute a fuzzy match score with guards against short-string inflation
+    and common financial stop-word token inflation."""
+    # Bug 1 guard: discard score when raw character-level similarity is too low
+    char_ratio = difflib.SequenceMatcher(None, new_norm, val_norm).ratio()
+    if char_ratio < 0.25:
+        return 0
+
+    methods = [
+        fuzz.WRatio(new_norm, val_norm),
+        fuzz.token_sort_ratio(new_norm, val_norm),
+    ]
+
+    # Bug 3 guard: skip token_set_ratio for short strings to avoid partial-match inflation
+    if len(new_norm) >= 5 and len(val_norm) >= 5:
+        tsr = fuzz.token_set_ratio(new_norm, val_norm)
+
+        # Bug 3 guard: cap token_set_ratio when shared tokens are all stop words
+        new_tokens = set(new_norm.split())
+        val_tokens = set(val_norm.split())
+        shared_tokens = new_tokens & val_tokens
+        if shared_tokens and shared_tokens.issubset(FINANCIAL_STOP_WORDS):
+            tsr = min(tsr, 59)
+
+        methods.append(tsr)
+
+    return max(methods)
 
 def check_duplicate(sf_accounts, account_name, region, country):
     if sf_accounts is None:
@@ -1046,11 +1081,7 @@ with tab3:
                             if not new_norm or not val_norm:
                                 continue
 
-                            score = max(
-                                fuzz.WRatio(new_norm, val_norm),
-                                fuzz.token_sort_ratio(new_norm, val_norm),
-                                fuzz.token_set_ratio(new_norm, val_norm),
-                            )
+                            score = compute_match_score(new_norm, val_norm)
 
                             if row_best_score is None or score > row_best_score:
                                 row_best_score = score
@@ -1079,8 +1110,8 @@ with tab3:
                             eligible = sorted(
                                 eligible,
                                 key=lambda x: (
+                                    x[0],
                                     1 if str(x[2] or "").strip().lower() == new_cust_country else 0,
-                                    x[0]
                                 ),
                                 reverse=True
                             )
