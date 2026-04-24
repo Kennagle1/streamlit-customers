@@ -218,6 +218,8 @@ FINANCIAL_STOP_WORDS = {
     "bank", "financial", "group", "capital", "asset", "management",
     "services", "solutions", "international", "global", "trust",
     "investments", "partners", "advisory", "fund", "funds",
+    "federal", "savings", "national", "commercial", "credit",
+    "corporate", "holding", "holdings", "co", "company",
 }
 
 # -----------------------------------------------
@@ -355,32 +357,69 @@ def normalize_name(name):
     return s
 
 def compute_match_score(new_norm, val_norm):
-    """Compute a fuzzy match score with guards against short-string inflation
-    and common financial stop-word token inflation."""
-    # Bug 1 guard: discard score when raw character-level similarity is too low
+    """Compute a calibrated fuzzy match score.
+
+    Scoring philosophy:
+    - 100   = exact normalised match only
+    - 85-99 = very close (minor word order / spelling differences)
+    - 70-84 = good match (some token overlap, similar length)
+    - <70   = weak / coincidental overlap
+
+    Key safeguards:
+    1. token_set_ratio is scaled by the length ratio of the two strings so that a short
+       name (e.g. "Federal Bank") cannot score 100 as a pure subset of a longer name
+       (e.g. "USAA Federal Savings Bank").
+    2. fuzz.WRatio is NOT used — it internally returns the maximum of several methods
+       including uncapped token_set_ratio, which causes the inflation described above.
+    3. Shared tokens that are all financial stop-words are penalised further.
+    4. An additional multiplicative penalty is applied when the two strings differ
+       greatly in length (length_ratio < 0.6).
+    5. Any non-exact match is capped at 99 so that 100 is reserved for exact matches.
+    """
+    if not new_norm or not val_norm:
+        return 0
+
+    # Exact normalised match → 100
+    if new_norm == val_norm:
+        return 100
+
+    # Hard filter: very low character-level overlap
     char_ratio = difflib.SequenceMatcher(None, new_norm, val_norm).ratio()
     if char_ratio < 0.25:
         return 0
 
-    methods = [
-        fuzz.WRatio(new_norm, val_norm),
-        fuzz.token_sort_ratio(new_norm, val_norm),
-    ]
+    # Length ratio — how similar are the two strings in length?
+    len_a, len_b = len(new_norm), len(val_norm)
+    length_ratio = min(len_a, len_b) / max(len_a, len_b) if max(len_a, len_b) > 0 else 1.0
 
-    # Bug 3 guard: skip token_set_ratio for short strings to avoid partial-match inflation
+    # Core metrics (no WRatio)
+    r   = fuzz.ratio(new_norm, val_norm)             # pure character-level similarity
+    tsr = fuzz.token_sort_ratio(new_norm, val_norm)  # token order-insensitive similarity
+
+    # token_set_ratio: always scale by length ratio to penalise subset matches
+    tset_contrib = 0.0
     if len(new_norm) >= 5 and len(val_norm) >= 5:
-        tsr = fuzz.token_set_ratio(new_norm, val_norm)
+        raw_tset = fuzz.token_set_ratio(new_norm, val_norm)
+        tset_adjusted = raw_tset * length_ratio   # scale down proportionally
 
-        # Bug 3 guard: cap token_set_ratio when shared tokens are all stop words
-        new_tokens = set(new_norm.split())
-        val_tokens = set(val_norm.split())
+        # Extra penalty if all shared tokens are financial stop-words
+        new_tokens    = set(new_norm.split())
+        val_tokens    = set(val_norm.split())
         shared_tokens = new_tokens & val_tokens
         if shared_tokens and shared_tokens.issubset(FINANCIAL_STOP_WORDS):
-            tsr = min(tsr, 59)
+            tset_adjusted = min(tset_adjusted, 59)
 
-        methods.append(tsr)
+        tset_contrib = tset_adjusted
 
-    return max(methods)
+    # Weighted blend: token_sort is most reliable, then char ratio, then adjusted token_set
+    blended = 0.50 * tsr + 0.30 * r + 0.20 * tset_contrib
+
+    # Extra multiplicative penalty for very large length differences (likely a subset match)
+    if length_ratio < 0.6:
+        blended *= (0.5 + 0.5 * length_ratio)
+
+    # Cap at 99 — only exact normalised match earns 100
+    return round(min(blended, 99.0), 1)
 
 def check_duplicate(sf_accounts, account_name, region, country):
     if sf_accounts is None:
@@ -927,13 +966,21 @@ with tab3:
     st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
     NO_VALUE_PLACEHOLDER = "—"
     HIGH_CONFIDENCE_THRESHOLD = 80
+    # How many top SF candidates to evaluate per new customer name
     MAX_TOP_MATCHES_TO_CONSIDER = 10
+    # Account name score must beat legal name score by at least this margin to be overridden
+    LEGAL_NAME_PREFERENCE_MARGIN = 5
 
     st.markdown("""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
     The tool will fuzzy-match each name against **Account Name** and **Legal Name**  
     in the **Salesforce Accounts CSV** uploaded in the sidebar,  
     returning a confidence score, a primary suggested match, and a secondary match where applicable.
+
+    **Scoring rules:**
+    - **100%** = exact match (after normalisation)
+    - **Account Name** match takes priority over a Legal Name match unless the Legal Name scores more than 5 points higher
+    - Both the matched Account Name and Legal Name are shown for Primary and Secondary matches
     """)
 
     new_customer_file = st.file_uploader(
@@ -1050,10 +1097,6 @@ with tab3:
                         if row_name and pd.notna(row_country):
                             new_customer_country_map[row_name] = str(row_country).strip().lower()
 
-                match_columns = []
-                for col in [sf_account_name_col, sf_legal_name_col]:
-                    if col and col not in match_columns:
-                        match_columns.append(col)
                 sf_records = sf_accounts.to_dict("records")
 
                 results = []
@@ -1062,96 +1105,111 @@ with tab3:
                 total = len(new_names)
                 for i, new_name in enumerate(new_names):
                     new_norm = normalize_name(new_name)
+
+                    # Each entry: (rep_score, acct_name_val, legal_name_val, sf_country_val, acct_score, legal_score)
                     top_matches = []
 
                     for row in sf_records:
-                        row_best_score = None
-                        row_fallback_display = ""
-                        for col in match_columns:
-                            val = row.get(col, "")
-                            if pd.isna(val):
-                                continue
-                            val_str = str(val).strip()
-                            if not val_str:
-                                continue
-                            if not row_fallback_display:
-                                row_fallback_display = val_str
+                        # ── Score against Account Name column ──────────────────────────
+                        acct_score = 0
+                        acct_name_val = ""
+                        if sf_account_name_col:
+                            val = row.get(sf_account_name_col, "")
+                            if pd.notna(val):
+                                val_str = str(val).strip()
+                                if val_str:
+                                    acct_name_val = val_str
+                                    acct_score = compute_match_score(new_norm, normalize_name(val_str))
 
-                            val_norm = normalize_name(val_str)
-                            if not new_norm or not val_norm:
-                                continue
+                        # ── Score against Legal Name column ────────────────────────────
+                        legal_score = 0
+                        legal_name_val = ""
+                        if sf_legal_name_col:
+                            val = row.get(sf_legal_name_col, "")
+                            if pd.notna(val):
+                                val_str = str(val).strip()
+                                if val_str:
+                                    legal_name_val = val_str
+                                    legal_score = compute_match_score(new_norm, normalize_name(val_str))
 
-                            score = compute_match_score(new_norm, val_norm)
+                        # ── Representative score: prefer Account Name unless Legal Name
+                        #    clearly beats it by more than LEGAL_NAME_PREFERENCE_MARGIN ──
+                        if legal_score > acct_score + LEGAL_NAME_PREFERENCE_MARGIN:
+                            rep_score = legal_score
+                        else:
+                            rep_score = acct_score
 
-                            if row_best_score is None or score > row_best_score:
-                                row_best_score = score
+                        # ── Country value for tie-breaking ────────────────────────────
+                        sf_country_val = ""
+                        if sf_country_col:
+                            raw = row.get(sf_country_col, "")
+                            sf_country_val = str(raw).strip() if pd.notna(raw) else ""
 
-                        if row_best_score is not None:
-                            if sf_account_name_col:
-                                account_name_val = row.get(sf_account_name_col, "")
-                                row_display_name = str(account_name_val).strip() if pd.notna(account_name_val) else ""
-                            else:
-                                row_display_name = row_fallback_display
+                        if rep_score > 0 and acct_name_val:
+                            top_matches.append((
+                                rep_score,
+                                acct_name_val,
+                                legal_name_val,
+                                sf_country_val,
+                                acct_score,
+                                legal_score,
+                            ))
 
-                            if row_display_name:
-                                sf_country_val = ""
-                                if sf_country_col:
-                                    raw = row.get(sf_country_col, "")
-                                    sf_country_val = str(raw).strip() if pd.notna(raw) else ""
-                                top_matches.append((row_best_score, row_display_name, sf_country_val))
-
+                    # Sort by representative score descending, keep top N
                     top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:MAX_TOP_MATCHES_TO_CONSIDER]
                     new_cust_country = new_customer_country_map.get(str(new_name).strip(), "")
 
-                    if top_matches:
-                        eligible = [(s, n, c) for s, n, c in top_matches if s >= confidence_threshold]
+                    # ── Filter by confidence threshold ─────────────────────────────────
+                    primary_name      = "No match found"
+                    primary_legal     = NO_VALUE_PLACEHOLDER
+                    primary_score     = None
+                    primary_sf_country = ""
+                    secondary_name    = NO_VALUE_PLACEHOLDER
+                    secondary_legal   = NO_VALUE_PLACEHOLDER
+                    secondary_score   = None
 
+                    if top_matches:
+                        eligible = [m for m in top_matches if m[0] >= confidence_threshold]
+
+                        # Country-aware re-sort: country match used as tiebreaker
                         if eligible and new_cust_country:
                             eligible = sorted(
                                 eligible,
                                 key=lambda x: (
                                     x[0],
-                                    1 if str(x[2] or "").strip().lower() == new_cust_country else 0,
+                                    1 if str(x[3] or "").strip().lower() == new_cust_country else 0,
                                 ),
                                 reverse=True
                             )
 
-                        primary_sf_country = ""
-                        secondary_name = ""
-                        secondary_score = None
                         if eligible:
-                            primary_score = round(eligible[0][0], 1)
-                            primary_name = eligible[0][1]
-                            primary_sf_country = eligible[0][2]
+                            primary_score      = round(eligible[0][0], 1)
+                            primary_name       = eligible[0][1]
+                            primary_legal      = eligible[0][2] if eligible[0][2] else NO_VALUE_PLACEHOLDER
+                            primary_sf_country = eligible[0][3]
                             if len(eligible) > 1:
-                                secondary_name = eligible[1][1]
                                 secondary_score = round(eligible[1][0], 1)
+                                secondary_name  = eligible[1][1]
+                                secondary_legal = eligible[1][2] if eligible[1][2] else NO_VALUE_PLACEHOLDER
                         else:
-                            primary_score = round(top_matches[0][0], 1)
-                            primary_name = top_matches[0][1] if primary_score >= confidence_threshold else "No match found"
-                            if primary_name != "No match found":
-                                primary_sf_country = top_matches[0][2]
-                            else:
-                                primary_sf_country = ""
-                                primary_score = None
-                    else:
-                        primary_name = "No match found"
-                        primary_score = None
-                        primary_sf_country = ""
-                        secondary_name = ""
-                        secondary_score = None
+                            # Best candidate is below threshold — report it as no match
+                            primary_name  = "No match found"
+                            primary_score = None
 
+                    # ── Country match flag ─────────────────────────────────────────────
                     country_match_flag = ""
                     if new_cust_country and primary_sf_country:
                         country_match_flag = "✅" if primary_sf_country.strip().lower() == new_cust_country else "⬜"
 
                     results.append({
-                        "New Customer Name": new_name,
-                        "Primary Match": primary_name,
-                        "Confidence Score (%)": primary_score if primary_score is not None else NO_VALUE_PLACEHOLDER,
-                        "Country Match": country_match_flag,
-                        "Secondary Match": secondary_name if secondary_name else NO_VALUE_PLACEHOLDER,
-                        "Secondary Confidence (%)": secondary_score if secondary_score is not None else NO_VALUE_PLACEHOLDER,
+                        "New Customer Name":          new_name,
+                        "Primary Match (Account)":    primary_name,
+                        "Primary Match (Legal Name)": primary_legal,
+                        "Confidence Score (%)":       primary_score if primary_score is not None else NO_VALUE_PLACEHOLDER,
+                        "Country Match":              country_match_flag,
+                        "Secondary Match (Account)":    secondary_name,
+                        "Secondary Match (Legal Name)": secondary_legal,
+                        "Secondary Confidence (%)":   secondary_score if secondary_score is not None else NO_VALUE_PLACEHOLDER,
                     })
 
                     if (i + 1) % max(1, total // 20) == 0 or i == total - 1:
@@ -1161,8 +1219,8 @@ with tab3:
 
                 results_df = pd.DataFrame(results)
 
-                matched = results_df[results_df["Primary Match"] != "No match found"]
-                unmatched = results_df[results_df["Primary Match"] == "No match found"]
+                matched   = results_df[results_df["Primary Match (Account)"] != "No match found"]
+                unmatched = results_df[results_df["Primary Match (Account)"] == "No match found"]
                 high_conf = matched[
                     pd.to_numeric(matched["Confidence Score (%)"], errors='coerce') >= HIGH_CONFIDENCE_THRESHOLD
                 ]
@@ -1195,9 +1253,10 @@ with tab3:
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
                 export_df = results_df.copy()
-                export_df["Confidence Score (%)"] = export_df["Confidence Score (%)"].replace(NO_VALUE_PLACEHOLDER, "")
-                export_df["Secondary Confidence (%)"] = export_df["Secondary Confidence (%)"].replace(NO_VALUE_PLACEHOLDER, "")
-                export_df["Secondary Match"] = export_df["Secondary Match"].replace(NO_VALUE_PLACEHOLDER, "")
+                for col in ["Confidence Score (%)", "Secondary Confidence (%)"]:
+                    export_df[col] = export_df[col].replace(NO_VALUE_PLACEHOLDER, "")
+                for col in ["Secondary Match (Account)", "Secondary Match (Legal Name)", "Primary Match (Legal Name)"]:
+                    export_df[col] = export_df[col].replace(NO_VALUE_PLACEHOLDER, "")
 
                 csv_buffer = io.StringIO()
                 export_df.to_csv(csv_buffer, index=False)
