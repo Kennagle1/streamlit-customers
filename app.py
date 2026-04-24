@@ -238,9 +238,9 @@ FINANCIAL_STOP_WORDS = {
 # -----------------------------------------------
 # Matching weights — Account Name is primary signal,
 # Legal Name is a supporting signal.
-# Combined score = ACCT_WEIGHT * acct_score + LEGAL_WEIGHT * legal_score
-# This means a record must have a good account name match to rank highly;
-# a great legal name match on its own cannot compensate for a poor account name.
+# Special rule: if Account Name is an exact match (score = 100),
+# the overall confidence is immediately returned as 100 regardless of legal name.
+# Otherwise: combined score = ACCT_WEIGHT * acct_score + LEGAL_WEIGHT * legal_score
 # -----------------------------------------------
 ACCT_WEIGHT  = 0.70
 LEGAL_WEIGHT = 0.30
@@ -444,17 +444,21 @@ def compute_match_score(new_norm, val_norm):
     return round(min(blended, 99.0), 1)
 
 def combined_score(acct_score, legal_score):
-    """Weighted combination of account name score and legal name score.
+    """Compute the overall confidence score for a candidate SF record.
 
-    Account Name carries 70% of the weight — it is the primary matching signal.
-    Legal Name carries 30% — it is a supporting signal that can lift a good
-    account name match but cannot compensate for a poor one.
+    Rules (in priority order):
+    1. If Account Name is an exact match (score = 100) → return 100 immediately.
+       The account name is definitively correct; no blending needed.
+    2. Otherwise → weighted blend: 70% Account Name + 30% Legal Name.
+       A strong legal name match alone cannot compensate for a poor account name.
 
-    Example (UniCredit):
-      'Buddy Bank'     acct=18, legal=90 → combined = 0.70*18 + 0.30*90 = 12.6 + 27.0 = 39.6
-      'UniCredit Group' acct=85, legal=90 → combined = 0.70*85 + 0.30*90 = 59.5 + 27.0 = 86.5
-    → UniCredit Group correctly ranks first.
+    Examples:
+      Exact acct match:  acct=100, legal=any  → 100
+      Close acct match:  acct=85,  legal=90   → 0.70*85 + 0.30*90 = 86.5
+      Poor acct match:   acct=18,  legal=90   → 0.70*18 + 0.30*90 = 39.6
     """
+    if acct_score == 100:
+        return 100.0
     return round(ACCT_WEIGHT * acct_score + LEGAL_WEIGHT * legal_score, 1)
 
 def check_duplicate(sf_accounts, account_name, region, country):
@@ -1011,8 +1015,8 @@ with tab3:
     returning a combined confidence score, a primary suggested match, and a secondary match where applicable.
 
     **Scoring rules:**
-    - **100%** = exact match (after normalisation)
-    - Confidence score = **{int(ACCT_WEIGHT*100)}% Account Name** + **{int(LEGAL_WEIGHT*100)}% Legal Name** — a strong account name match drives the ranking; legal name is a supporting signal
+    - **100%** = exact Account Name match (after normalisation) — no blending applied
+    - Otherwise: **{int(ACCT_WEIGHT*100)}% Account Name** + **{int(LEGAL_WEIGHT*100)}% Legal Name** weighted blend
     - Both the matched Account Name and Legal Name are shown for Primary and Secondary matches
     """)
 
@@ -1165,9 +1169,9 @@ with tab3:
                                     legal_name_val = val_str
                                     legal_score = compute_match_score(new_norm, normalize_name(val_str))
 
-                        # ── Combined score: 70% account name + 30% legal name ─────────
-                        # A strong account name match dominates; a good legal name match
-                        # on its own (with a poor account name) scores much lower.
+                        # ── Combined score ─────────────────────────────────────────────
+                        # If account name is exact (100) → overall = 100.
+                        # Otherwise → 70% acct + 30% legal weighted blend.
                         rep_score = combined_score(acct_score, legal_score)
 
                         # ── Country value for tie-breaking ────────────────────────────
