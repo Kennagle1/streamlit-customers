@@ -56,6 +56,19 @@ st.markdown("""
         color: #21CFB2 !important;
     }
 
+    /* Sidebar file upload browse button — make it visible on dark background */
+    section[data-testid="stSidebar"] .stFileUploader button {
+        background-color: #21CFB2 !important;
+        color: #002E33 !important;
+        border: none !important;
+        font-weight: 700 !important;
+        border-radius: 6px !important;
+    }
+    section[data-testid="stSidebar"] .stFileUploader button:hover {
+        background-color: #1ab89d !important;
+        color: #002E33 !important;
+    }
+
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: #002E33;
@@ -223,6 +236,16 @@ FINANCIAL_STOP_WORDS = {
 }
 
 # -----------------------------------------------
+# Matching weights — Account Name is primary signal,
+# Legal Name is a supporting signal.
+# Combined score = ACCT_WEIGHT * acct_score + LEGAL_WEIGHT * legal_score
+# This means a record must have a good account name match to rank highly;
+# a great legal name match on its own cannot compensate for a poor account name.
+# -----------------------------------------------
+ACCT_WEIGHT  = 0.70
+LEGAL_WEIGHT = 0.30
+
+# -----------------------------------------------
 # G-SIB & D-SIB LISTS
 # -----------------------------------------------
 GSIB_LIST = [
@@ -357,22 +380,21 @@ def normalize_name(name):
     return s
 
 def compute_match_score(new_norm, val_norm):
-    """Compute a calibrated fuzzy match score.
+    """Compute a calibrated fuzzy match score between two normalised strings.
 
     Scoring philosophy:
     - 100   = exact normalised match only
     - 85-99 = very close (minor word order / spelling differences)
-    - 70-84 = good match (some token overlap, similar length)
+    - 70-84 = good match (significant token overlap, similar length)
     - <70   = weak / coincidental overlap
 
     Key safeguards:
-    1. token_set_ratio is scaled by the length ratio of the two strings so that a short
-       name (e.g. "Federal Bank") cannot score 100 as a pure subset of a longer name
-       (e.g. "USAA Federal Savings Bank").
-    2. fuzz.WRatio is NOT used — it internally returns the maximum of several methods
-       including uncapped token_set_ratio, which causes the inflation described above.
+    1. token_set_ratio is scaled by the length ratio of the two strings so that a
+       short name cannot score 100 as a pure subset of a longer name.
+    2. fuzz.WRatio is NOT used — it internally returns the uncapped maximum of
+       several methods including token_set_ratio, causing score inflation.
     3. Shared tokens that are all financial stop-words are penalised further.
-    4. An additional multiplicative penalty is applied when the two strings differ
+    4. An additional multiplicative penalty is applied when the strings differ
        greatly in length (length_ratio < 0.6).
     5. Any non-exact match is capped at 99 so that 100 is reserved for exact matches.
     """
@@ -420,6 +442,20 @@ def compute_match_score(new_norm, val_norm):
 
     # Cap at 99 — only exact normalised match earns 100
     return round(min(blended, 99.0), 1)
+
+def combined_score(acct_score, legal_score):
+    """Weighted combination of account name score and legal name score.
+
+    Account Name carries 70% of the weight — it is the primary matching signal.
+    Legal Name carries 30% — it is a supporting signal that can lift a good
+    account name match but cannot compensate for a poor one.
+
+    Example (UniCredit):
+      'Buddy Bank'     acct=18, legal=90 → combined = 0.70*18 + 0.30*90 = 12.6 + 27.0 = 39.6
+      'UniCredit Group' acct=85, legal=90 → combined = 0.70*85 + 0.30*90 = 59.5 + 27.0 = 86.5
+    → UniCredit Group correctly ranks first.
+    """
+    return round(ACCT_WEIGHT * acct_score + LEGAL_WEIGHT * legal_score, 1)
 
 def check_duplicate(sf_accounts, account_name, region, country):
     if sf_accounts is None:
@@ -966,20 +1002,17 @@ with tab3:
     st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
     NO_VALUE_PLACEHOLDER = "—"
     HIGH_CONFIDENCE_THRESHOLD = 80
-    # How many top SF candidates to evaluate per new customer name
     MAX_TOP_MATCHES_TO_CONSIDER = 10
-    # Account name score must beat legal name score by at least this margin to be overridden
-    LEGAL_NAME_PREFERENCE_MARGIN = 5
 
-    st.markdown("""
+    st.markdown(f"""
     Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
     The tool will fuzzy-match each name against **Account Name** and **Legal Name**  
     in the **Salesforce Accounts CSV** uploaded in the sidebar,  
-    returning a confidence score, a primary suggested match, and a secondary match where applicable.
+    returning a combined confidence score, a primary suggested match, and a secondary match where applicable.
 
     **Scoring rules:**
     - **100%** = exact match (after normalisation)
-    - **Account Name** match takes priority over a Legal Name match unless the Legal Name scores more than 5 points higher
+    - Confidence score = **{int(ACCT_WEIGHT*100)}% Account Name** + **{int(LEGAL_WEIGHT*100)}% Legal Name** — a strong account name match drives the ranking; legal name is a supporting signal
     - Both the matched Account Name and Legal Name are shown for Primary and Secondary matches
     """)
 
@@ -1132,12 +1165,10 @@ with tab3:
                                     legal_name_val = val_str
                                     legal_score = compute_match_score(new_norm, normalize_name(val_str))
 
-                        # ── Representative score: prefer Account Name unless Legal Name
-                        #    clearly beats it by more than LEGAL_NAME_PREFERENCE_MARGIN ──
-                        if legal_score > acct_score + LEGAL_NAME_PREFERENCE_MARGIN:
-                            rep_score = legal_score
-                        else:
-                            rep_score = acct_score
+                        # ── Combined score: 70% account name + 30% legal name ─────────
+                        # A strong account name match dominates; a good legal name match
+                        # on its own (with a poor account name) scores much lower.
+                        rep_score = combined_score(acct_score, legal_score)
 
                         # ── Country value for tie-breaking ────────────────────────────
                         sf_country_val = ""
@@ -1155,18 +1186,18 @@ with tab3:
                                 legal_score,
                             ))
 
-                    # Sort by representative score descending, keep top N
+                    # Sort by combined score descending, keep top N
                     top_matches = sorted(top_matches, key=lambda x: x[0], reverse=True)[:MAX_TOP_MATCHES_TO_CONSIDER]
                     new_cust_country = new_customer_country_map.get(str(new_name).strip(), "")
 
                     # ── Filter by confidence threshold ─────────────────────────────────
-                    primary_name      = "No match found"
-                    primary_legal     = NO_VALUE_PLACEHOLDER
-                    primary_score     = None
+                    primary_name       = "No match found"
+                    primary_legal      = NO_VALUE_PLACEHOLDER
+                    primary_score      = None
                     primary_sf_country = ""
-                    secondary_name    = NO_VALUE_PLACEHOLDER
-                    secondary_legal   = NO_VALUE_PLACEHOLDER
-                    secondary_score   = None
+                    secondary_name     = NO_VALUE_PLACEHOLDER
+                    secondary_legal    = NO_VALUE_PLACEHOLDER
+                    secondary_score    = None
 
                     if top_matches:
                         eligible = [m for m in top_matches if m[0] >= confidence_threshold]
@@ -1192,7 +1223,6 @@ with tab3:
                                 secondary_name  = eligible[1][1]
                                 secondary_legal = eligible[1][2] if eligible[1][2] else NO_VALUE_PLACEHOLDER
                         else:
-                            # Best candidate is below threshold — report it as no match
                             primary_name  = "No match found"
                             primary_score = None
 
