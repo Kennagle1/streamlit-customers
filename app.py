@@ -235,6 +235,47 @@ FINANCIAL_STOP_WORDS = {
     "corporate", "holding", "holdings", "co", "company",
 }
 
+COUNTRY_REGION_MAP = {
+    # UK & Ireland
+    "United Kingdom": "UK & Ireland",
+    "Ireland": "UK & Ireland",
+    # EMEA — Western Europe
+    "France": "EMEA", "Germany": "EMEA", "Netherlands": "EMEA",
+    "Belgium": "EMEA", "Luxembourg": "EMEA", "Switzerland": "EMEA",
+    "Austria": "EMEA", "Italy": "EMEA", "Spain": "EMEA",
+    "Portugal": "EMEA", "Sweden": "EMEA", "Norway": "EMEA",
+    "Denmark": "EMEA", "Finland": "EMEA", "Iceland": "EMEA",
+    # EMEA — Eastern Europe
+    "Poland": "EMEA", "Czech Republic": "EMEA", "Hungary": "EMEA",
+    "Romania": "EMEA", "Bulgaria": "EMEA", "Croatia": "EMEA",
+    "Slovakia": "EMEA", "Slovenia": "EMEA", "Serbia": "EMEA",
+    "Greece": "EMEA", "Cyprus": "EMEA", "Malta": "EMEA",
+    "Estonia": "EMEA", "Latvia": "EMEA", "Lithuania": "EMEA",
+    "Ukraine": "EMEA", "Russia": "EMEA",
+    # EMEA — Middle East & Africa
+    "United Arab Emirates": "EMEA", "Saudi Arabia": "EMEA",
+    "Qatar": "EMEA", "Kuwait": "EMEA", "Bahrain": "EMEA",
+    "Oman": "EMEA", "Israel": "EMEA", "Turkey": "EMEA",
+    "Jordan": "EMEA", "Lebanon": "EMEA", "Egypt": "EMEA",
+    "South Africa": "EMEA", "Nigeria": "EMEA", "Kenya": "EMEA",
+    "Ghana": "EMEA", "Morocco": "EMEA",
+    # APAC
+    "Australia": "APAC", "New Zealand": "APAC", "Singapore": "APAC",
+    "Hong Kong": "APAC", "Japan": "APAC", "China": "APAC",
+    "India": "APAC", "South Korea": "APAC", "Malaysia": "APAC",
+    "Thailand": "APAC", "Indonesia": "APAC", "Philippines": "APAC",
+    "Vietnam": "APAC", "Taiwan": "APAC", "Pakistan": "APAC",
+    "Bangladesh": "APAC", "Sri Lanka": "APAC",
+    # Americas
+    "United States": "Americas", "Canada": "Americas",
+    "Mexico": "Americas", "Brazil": "Americas", "Argentina": "Americas",
+    "Chile": "Americas", "Colombia": "Americas", "Peru": "Americas",
+    "Uruguay": "Americas", "Venezuela": "Americas", "Ecuador": "Americas",
+    "Costa Rica": "Americas", "Panama": "Americas",
+    "Cayman Islands": "Americas", "Bermuda": "Americas",
+    "British Virgin Islands": "Americas",
+}
+
 # -----------------------------------------------
 # Matching weights — Account Name is primary signal,
 # Legal Name is a supporting signal.
@@ -797,6 +838,134 @@ def apply_segmentation(research_data, account_name="", region="", country=""):
     }
 
 # -----------------------------------------------
+# FUZZY DUPLICATE CHECK HELPER
+# -----------------------------------------------
+def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
+    """Score account_name against every row in sf_accounts using the same
+    fuzzy-matching engine as Tab 3.  Returns a list of dicts (sorted
+    high→low by Confidence %) containing only rows with combined score
+    ≥ min_score, capped at top_n results.
+
+    Args:
+        sf_accounts (pd.DataFrame | None): The uploaded Salesforce Accounts CSV.
+            Column names are auto-detected (Account ID, Account Name, Legal Name,
+            Country).  Returns [] immediately when None or empty.
+        account_name (str): The name to search for.
+        top_n (int): Maximum number of results to return (default 10).
+        min_score (float): Minimum combined confidence score to include a row
+            (default 60, i.e. 60%).
+
+    Returns:
+        list[dict]: Each dict has keys: Account ID, Account Name, Legal Name,
+            Country, Confidence %.
+    """
+    if sf_accounts is None or sf_accounts.empty:
+        return []
+
+    cols = sf_accounts.columns.tolist()
+    cols_lc = {c: c.lower().strip() for c in cols}
+
+    # Detect Account ID column — exact "account id" > "accountid" > "id"
+    sf_id_col = None
+    for c in cols:
+        if cols_lc[c] == "account id":
+            sf_id_col = c
+            break
+    if sf_id_col is None:
+        for c in cols:
+            if cols_lc[c] == "accountid":
+                sf_id_col = c
+                break
+    if sf_id_col is None:
+        for c in cols:
+            if cols_lc[c] == "id":
+                sf_id_col = c
+                break
+
+    # Detect Account Name column (exclude columns containing "id")
+    sf_acct_name_col = None
+    non_id_cols = [c for c in cols if 'id' not in cols_lc[c]]
+    for c in non_id_cols:
+        if cols_lc[c] == 'account name':
+            sf_acct_name_col = c
+            break
+    if sf_acct_name_col is None:
+        for c in non_id_cols:
+            if 'account name' in cols_lc[c]:
+                sf_acct_name_col = c
+                break
+    if sf_acct_name_col is None:
+        for c in non_id_cols:
+            if 'name' in cols_lc[c]:
+                sf_acct_name_col = c
+                break
+
+    # Detect Legal Name column
+    sf_legal_col = None
+    for c in cols:
+        if 'legal name' in cols_lc[c]:
+            sf_legal_col = c
+            break
+    if sf_legal_col is None:
+        for c in cols:
+            if 'legal' in cols_lc[c]:
+                sf_legal_col = c
+                break
+
+    # Detect Country column
+    sf_country_col = None
+    for c in cols:
+        if 'country' in cols_lc[c]:
+            sf_country_col = c
+            break
+
+    new_norm = normalize_name(account_name)
+    scored = []
+
+    for _, row in sf_accounts.iterrows():
+        acct_score = 0
+        acct_val = ""
+        if sf_acct_name_col:
+            raw = row.get(sf_acct_name_col, "")
+            if pd.notna(raw):
+                acct_val = str(raw).strip()
+                if acct_val:
+                    acct_score = compute_match_score(new_norm, normalize_name(acct_val))
+
+        legal_score = 0
+        legal_val = ""
+        if sf_legal_col:
+            raw = row.get(sf_legal_col, "")
+            if pd.notna(raw):
+                legal_val = str(raw).strip()
+                if legal_val:
+                    legal_score = compute_match_score(new_norm, normalize_name(legal_val))
+
+        score = combined_score(acct_score, legal_score)
+
+        if score >= min_score and acct_val:
+            id_val = ""
+            if sf_id_col:
+                raw = row.get(sf_id_col, "")
+                id_val = str(raw).strip() if pd.notna(raw) else ""
+
+            country_val = ""
+            if sf_country_col:
+                raw = row.get(sf_country_col, "")
+                country_val = str(raw).strip() if pd.notna(raw) else ""
+
+            scored.append({
+                "Account ID": id_val,
+                "Account Name": acct_val,
+                "Legal Name": legal_val,
+                "Country": country_val,
+                "Confidence %": score,
+            })
+
+    scored.sort(key=lambda x: x["Confidence %"], reverse=True)
+    return scored[:top_n]
+
+# -----------------------------------------------
 # TABS
 # -----------------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs(["Customer Attributes", "Lead Matching", "Account Matching", "ICP Analysis"])
@@ -806,185 +975,297 @@ tab1, tab2, tab3, tab4 = st.tabs(["Customer Attributes", "Lead Matching", "Accou
 # ===============================================
 with tab1:
 
+    # Initialise session state keys
+    for _k, _v in [
+        ("tab1_phase", "input"),
+        ("tab1_dup_results", []),
+        ("tab1_research", None),
+        ("tab1_segmentation", None),
+        ("tab1_snap", {}),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
     st.markdown('<p class="fen-section-title">Enter Account Details</p>', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         account_name = st.text_input("Account Name *", placeholder="e.g. Bank of Ireland")
     with col2:
-        account_type = st.selectbox("Account Type *", ["Other", "Partner"])
+        account_type = st.selectbox("Account Type *", ["Prospect", "Partner"], index=0)
     with col3:
-        region = st.selectbox("Region *", ["EMEA", "APAC", "Americas", "UK & Ireland"])
+        # Build country options: union of SF account countries + COUNTRY_REGION_MAP keys
+        _sf_country_opts = []
+        if sf_accounts is not None:
+            for _c in sf_accounts.columns:
+                if 'country' in _c.lower():
+                    _raw = sf_accounts[_c].dropna().astype(str).str.strip().str.title()
+                    _sf_country_opts = sorted(_raw[_raw != ""].unique().tolist())
+                    break
+        _all_countries = sorted(set(_sf_country_opts) | set(COUNTRY_REGION_MAP.keys()))
+        t1_country = st.selectbox(
+            "Country *",
+            options=[""] + _all_countries,
+            help="Type to search countries",
+            key="tab1_country",
+        )
     with col4:
-        country = st.text_input("Country *", placeholder="e.g. Ireland")
+        t1_region = COUNTRY_REGION_MAP.get(t1_country, "")
+        st.text_input("Region", value=t1_region, disabled=True)
 
     run_button = st.button("Run Enrichment Checks", type="primary", use_container_width=True)
 
     if run_button:
-        if not account_name.strip() or not region or not country.strip():
-            st.error("Please fill in all required fields: Account Name, Region, and Country.")
+        if not account_name.strip() or not t1_country:
+            st.error("Please fill in all required fields: Account Name and Country.")
             st.stop()
 
+        if sf_accounts is None:
+            st.error(
+                "⚠️ **No Salesforce Account list uploaded.** Please upload the Salesforce Accounts CSV "
+                "using the sidebar uploader before running enrichment checks. "
+                "This is required to perform the duplicate check."
+            )
+            st.stop()
+
+        st.session_state["tab1_snap"] = {
+            "account_name": account_name,
+            "account_type": account_type,
+            "country": t1_country,
+            "region": t1_region,
+        }
+        st.session_state["tab1_dup_results"] = run_fuzzy_dup_check(sf_accounts, account_name)
+        st.session_state["tab1_phase"] = "dup_check"
+        st.session_state["tab1_research"] = None
+        st.session_state["tab1_segmentation"] = None
+        st.rerun()
+
+    # ── Phases: dup_check / enrichment ────────────────────────────────────────
+    if st.session_state["tab1_phase"] in ("dup_check", "enrichment"):
+        _snap         = st.session_state.get("tab1_snap", {})
+        _account_name = _snap.get("account_name", "")
+        _account_type = _snap.get("account_type", "")
+        _country      = _snap.get("country", "")
+        _region       = _snap.get("region", "")
+        _dup_results  = st.session_state.get("tab1_dup_results", [])
+
         st.divider()
-        st.markdown(f'<p class="fen-section-title">Running checks for: {account_name}</p>', unsafe_allow_html=True)
+        st.markdown(
+            f'<p class="fen-section-title">Running checks for: {_account_name}</p>',
+            unsafe_allow_html=True,
+        )
 
-        # PARTNER ACCOUNT FLOW
-        if account_type == "Partner":
-            st.info("Partner Account — only a Region/Country duplicate check is required.")
-            with st.status("Checking for existing Partner account...", expanded=True) as status:
-                st.write(f"Searching for `{account_name}` in region `{region}` / country `{country}`...")
-                st.write(f"Also checking variations: {generate_name_variations(account_name)}")
-                matches, warning = check_duplicate(sf_accounts, account_name, region, country)
-                if warning:
-                    st.warning(warning)
-                    status.update(label="Duplicate check skipped — no file uploaded", state="error")
-                elif matches:
-                    same_region = [m for m in matches if '🔴' in m['Same Region']]
-                    if same_region:
-                        st.error("Existing Partner account found in the same region!")
-                        st.dataframe(pd.DataFrame(same_region), use_container_width=True, hide_index=True)
-                        st.warning("Please check with Ken before proceeding.")
-                        status.update(label="Duplicate detected — escalate to Ken", state="error")
-                    else:
-                        st.warning("Similar account name found but in a different region — review below:")
-                        st.dataframe(pd.DataFrame(matches), use_container_width=True, hide_index=True)
-                        status.update(label="Similar account found (different region)", state="complete")
+        def _highlight_conf(val):
+            try:
+                v = float(val)
+                if v >= 90:
+                    return 'background-color: #d4edda; color: #155724'
+                elif v >= 70:
+                    return 'background-color: #fff3cd; color: #856404'
                 else:
-                    st.success(f"No existing Partner account found for {account_name} in {region} / {country}")
-                    status.update(label="No duplicate found — safe to proceed", state="complete")
+                    return 'background-color: #f8d7da; color: #721c24'
+            except (ValueError, TypeError):
+                return ''
 
-        # ALL OTHER ACCOUNTS FLOW
-        else:
-            duplicate_ok = True
+        # ── PARTNER FLOW ──────────────────────────────────────────────────────
+        if _account_type == "Partner":
+            st.info("Partner Account — only a duplicate check is required.")
+            st.markdown(
+                '<p class="fen-section-title">Suggested Matches</p>',
+                unsafe_allow_html=True,
+            )
+            if not _dup_results:
+                st.success("No potential duplicate accounts found.")
+            else:
+                _dup_df = pd.DataFrame(_dup_results)
+                _styled = _dup_df.style.map(_highlight_conf, subset=["Confidence %"])
+                st.dataframe(_styled, use_container_width=True, hide_index=True)
 
-            with st.status("Step 1 of 3: Checking for existing account in Salesforce...", expanded=True) as status:
-                st.write(f"Searching for `{account_name}` and variations: {generate_name_variations(account_name)}")
-                matches, warning = check_duplicate(sf_accounts, account_name, region, country)
-                if warning:
-                    st.warning(warning)
-                    status.update(label="Step 1: Duplicate check skipped — no file uploaded", state="error")
-                elif matches:
-                    same_region = [m for m in matches if '🔴' in m['Same Region']]
-                    if same_region:
-                        st.error("Potential duplicate found in the same region!")
-                        st.dataframe(pd.DataFrame(same_region), use_container_width=True, hide_index=True)
-                        st.warning("Please check with Ken before proceeding. Enrichment has been paused.")
-                        status.update(label="Step 1: Duplicate detected — check with Ken", state="error")
-                        duplicate_ok = False
-                    else:
-                        st.warning("Similar name found but in a different region:")
-                        st.dataframe(pd.DataFrame(matches), use_container_width=True, hide_index=True)
-                        st.info("Proceeding with enrichment — review the match above carefully.")
-                        status.update(label="Step 1: Similar name (different region) — review carefully", state="complete")
-                else:
-                    st.success(f"No existing account found for {account_name} in {region}")
-                    status.update(label="Step 1: No duplicate found", state="complete")
-
-            if not duplicate_ok:
-                st.stop()
-
-            research = {}
-            with st.status("Step 2 of 3: Researching company on the web...", expanded=True) as status:
-                st.write("Querying: revenue, employees, HQ, legal name, parent company, AUM, industry")
-                st.write("Sources: DuckDuckGo → company site, Wikipedia, Bloomberg, Reuters, Crunchbase")
-                research = web_research(account_name)
-                if 'error' in research:
-                    st.error(f"Search error: {research['error']}")
-                    status.update(label="Step 2: Web research failed", state="error")
-                else:
-                    st.write(f"Retrieved {len(research['snippets'])} results from {len(research['sources'])} sources")
-                    for src in research['sources'][:4]:
-                        st.write(f"  - {src}")
-                    status.update(label=f"Step 2: Web research complete ({len(research['sources'])} sources)", state="complete")
-
-            segmentation = {}
-            with st.status("Step 3 of 3: Applying segmentation logic...", expanded=True) as status:
-                st.write("Applying Customer Segment, Account Category and Secondary Owner rules...")
-                segmentation = apply_segmentation(research, account_name, region, country)
-                seg    = segmentation.get('customer_segment', '')
-                colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(seg, "⚪")
-                st.write(f"{colour} Customer Segment: {seg}")
-                rationale = segmentation.get('customer_segment_rationale', '')
-                if "warning" in rationale.lower() or "verify" in rationale.lower():
-                    st.warning(rationale)
-                else:
-                    st.caption(f"Rationale: {rationale}")
-                status.update(label=f"Step 3: Segmentation complete — {seg}", state="complete")
-
-            # RESULTS
-            st.divider()
-            st.markdown('<p class="fen-section-title">Enrichment Results</p>', unsafe_allow_html=True)
-
-            col_a, col_b = st.columns(2)
-
-            with col_a:
-                st.markdown('<div class="fen-card"><h4>Segment Information</h4>', unsafe_allow_html=True)
-                st.dataframe(pd.DataFrame({
-                    "Field": ["Detailed Business Segment", "Business Segment", "Market Segment"],
-                    "Value": [
-                        research.get('detailed_business_segment', 'N/A'),
-                        research.get('business_segment', 'N/A'),
-                        research.get('market_segment', 'N/A'),
-                    ]
-                }), use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-                st.markdown('<div class="fen-card"><h4>Parent Information</h4>', unsafe_allow_html=True)
-                st.dataframe(pd.DataFrame({
-                    "Field": ["Ultimate Parent", "Ultimate Parent HQ"],
-                    "Value": [
-                        research.get('ultimate_parent', 'N/A'),
-                        research.get('ultimate_parent_hq', 'N/A'),
-                    ]
-                }), use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with col_b:
-                st.markdown('<div class="fen-card"><h4>Company Metrics</h4>', unsafe_allow_html=True)
-                aum_segments = ['Full-Service Banks', 'Banks', 'Asset Mgmt., Servicing & Insurance']
-                show_aum = research.get('market_segment', '') in aum_segments
-                metrics_fields = ["Legal Name", "Country HQ", "Annual Revenue (EUR)", "Employees"]
-                metrics_values = [
-                    research.get('legal_name', 'N/A'),
-                    research.get('country_hq', 'N/A'),
-                    research.get('annual_revenue_eur', 'N/A'),
-                    research.get('employees', 'N/A'),
+                _same_country = [
+                    m for m in _dup_results
+                    if m.get("Country", "").strip().lower() == _country.strip().lower()
                 ]
-                if show_aum:
-                    metrics_fields.append("AUM (EUR)")
-                    metrics_values.append(research.get('aum_eur', 'N/A'))
-                st.dataframe(pd.DataFrame({
-                    "Field": metrics_fields,
-                    "Value": metrics_values
-                }), use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+                if _same_country:
+                    st.warning(
+                        "⚠️ Similar account found in the same country. "
+                        "Please check with Ken before proceeding."
+                    )
 
-                st.markdown('<div class="fen-card"><h4>Account Categorisation</h4>', unsafe_allow_html=True)
-                seg    = segmentation.get('customer_segment', 'N/A')
-                colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(seg, "⚪")
-                st.dataframe(pd.DataFrame({
-                    "Field": [
-                        "Customer Segment",
-                        "Segment Rationale",
-                        "Account Category",
-                        "Account Category Note",
-                        "Secondary Account Owner",
-                    ],
-                    "Value": [
-                        f"{colour} {seg}",
-                        segmentation.get('customer_segment_rationale', 'N/A'),
-                        segmentation.get('account_category', 'N/A'),
-                        segmentation.get('account_category_note', 'N/A'),
-                        segmentation.get('secondary_account_owner', 'N/A'),
+        # ── PROSPECT (and all non-Partner) FLOW ───────────────────────────────
+        else:
+            st.markdown(
+                '<p class="fen-section-title">Suggested Matches</p>',
+                unsafe_allow_html=True,
+            )
+            if not _dup_results:
+                st.success("No potential duplicate accounts found.")
+            else:
+                _dup_df = pd.DataFrame(_dup_results)
+                _styled = _dup_df.style.map(_highlight_conf, subset=["Confidence %"])
+                st.dataframe(_styled, use_container_width=True, hide_index=True)
+
+            # Show "Continue" button only in dup_check phase
+            if st.session_state["tab1_phase"] == "dup_check":
+                _continue = st.button(
+                    "✅ Continue with Enrichment", type="primary", use_container_width=True
+                )
+                if _continue:
+                    st.session_state["tab1_phase"] = "enrichment"
+                    st.rerun()
+
+            # Enrichment: Steps 2 & 3
+            elif st.session_state["tab1_phase"] == "enrichment":
+                # Step 2 — Web research (run once, cache in session state)
+                if st.session_state["tab1_research"] is None:
+                    _research = {}
+                    with st.status(
+                        "Step 2 of 3: Researching company on the web...", expanded=True
+                    ) as _status:
+                        st.write(
+                            "Querying: revenue, employees, HQ, legal name, parent company, AUM, industry"
+                        )
+                        st.write(
+                            "Sources: DuckDuckGo → company site, Wikipedia, Bloomberg, Reuters, Crunchbase"
+                        )
+                        _research = web_research(_account_name)
+                        if 'error' in _research:
+                            st.error(f"Search error: {_research['error']}")
+                            _status.update(label="Step 2: Web research failed", state="error")
+                        else:
+                            st.write(
+                                f"Retrieved {len(_research['snippets'])} results from "
+                                f"{len(_research['sources'])} sources"
+                            )
+                            for _src in _research['sources'][:4]:
+                                st.write(f"  - {_src}")
+                            _status.update(
+                                label=f"Step 2: Web research complete ({len(_research['sources'])} sources)",
+                                state="complete",
+                            )
+                    st.session_state["tab1_research"] = _research
+
+                # Step 3 — Segmentation (run once, cache in session state)
+                if st.session_state["tab1_segmentation"] is None:
+                    _research = st.session_state["tab1_research"]
+                    _segmentation = {}
+                    with st.status(
+                        "Step 3 of 3: Applying segmentation logic...", expanded=True
+                    ) as _status:
+                        st.write(
+                            "Applying Customer Segment, Account Category and Secondary Owner rules..."
+                        )
+                        _segmentation = apply_segmentation(
+                            _research, _account_name, _region, _country
+                        )
+                        _seg = _segmentation.get('customer_segment', '')
+                        _colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(
+                            _seg, "⚪"
+                        )
+                        st.write(f"{_colour} Customer Segment: {_seg}")
+                        _rationale = _segmentation.get('customer_segment_rationale', '')
+                        if "warning" in _rationale.lower() or "verify" in _rationale.lower():
+                            st.warning(_rationale)
+                        else:
+                            st.caption(f"Rationale: {_rationale}")
+                        _status.update(
+                            label=f"Step 3: Segmentation complete — {_seg}", state="complete"
+                        )
+                    st.session_state["tab1_segmentation"] = _segmentation
+
+                # Display results from session state
+                _research     = st.session_state["tab1_research"]
+                _segmentation = st.session_state["tab1_segmentation"]
+
+                st.divider()
+                st.markdown(
+                    '<p class="fen-section-title">Enrichment Results</p>',
+                    unsafe_allow_html=True,
+                )
+
+                _col_a, _col_b = st.columns(2)
+
+                with _col_a:
+                    st.markdown(
+                        '<div class="fen-card"><h4>Segment Information</h4>',
+                        unsafe_allow_html=True,
+                    )
+                    st.dataframe(pd.DataFrame({
+                        "Field": ["Detailed Business Segment", "Business Segment", "Market Segment"],
+                        "Value": [
+                            _research.get('detailed_business_segment', 'N/A'),
+                            _research.get('business_segment', 'N/A'),
+                            _research.get('market_segment', 'N/A'),
+                        ]
+                    }), use_container_width=True, hide_index=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                    st.markdown(
+                        '<div class="fen-card"><h4>Parent Information</h4>',
+                        unsafe_allow_html=True,
+                    )
+                    st.dataframe(pd.DataFrame({
+                        "Field": ["Ultimate Parent", "Ultimate Parent HQ"],
+                        "Value": [
+                            _research.get('ultimate_parent', 'N/A'),
+                            _research.get('ultimate_parent_hq', 'N/A'),
+                        ]
+                    }), use_container_width=True, hide_index=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                with _col_b:
+                    st.markdown(
+                        '<div class="fen-card"><h4>Company Metrics</h4>',
+                        unsafe_allow_html=True,
+                    )
+                    _aum_segs = ['Full-Service Banks', 'Banks', 'Asset Mgmt., Servicing & Insurance']
+                    _show_aum = _research.get('market_segment', '') in _aum_segs
+                    _metrics_fields = ["Legal Name", "Country HQ", "Annual Revenue (EUR)", "Employees"]
+                    _metrics_values = [
+                        _research.get('legal_name', 'N/A'),
+                        _research.get('country_hq', 'N/A'),
+                        _research.get('annual_revenue_eur', 'N/A'),
+                        _research.get('employees', 'N/A'),
                     ]
-                }), use_container_width=True, hide_index=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+                    if _show_aum:
+                        _metrics_fields.append("AUM (EUR)")
+                        _metrics_values.append(_research.get('aum_eur', 'N/A'))
+                    st.dataframe(pd.DataFrame({
+                        "Field": _metrics_fields,
+                        "Value": _metrics_values,
+                    }), use_container_width=True, hide_index=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-            with st.expander("View raw web search results (for manual review)"):
-                for i, item in enumerate(research.get('snippets', []), 1):
-                    st.markdown(f"**Result {i}** — _{item['query']}_")
-                    st.write(f"Source: {item['source']}")
-                    st.write(item['snippet'])
-                    st.divider()
+                    st.markdown(
+                        '<div class="fen-card"><h4>Account Categorisation</h4>',
+                        unsafe_allow_html=True,
+                    )
+                    _seg    = _segmentation.get('customer_segment', 'N/A')
+                    _colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(
+                        _seg, "⚪"
+                    )
+                    st.dataframe(pd.DataFrame({
+                        "Field": [
+                            "Customer Segment",
+                            "Segment Rationale",
+                            "Account Category",
+                            "Account Category Note",
+                            "Secondary Account Owner",
+                        ],
+                        "Value": [
+                            f"{_colour} {_seg}",
+                            _segmentation.get('customer_segment_rationale', 'N/A'),
+                            _segmentation.get('account_category', 'N/A'),
+                            _segmentation.get('account_category_note', 'N/A'),
+                            _segmentation.get('secondary_account_owner', 'N/A'),
+                        ]
+                    }), use_container_width=True, hide_index=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                with st.expander("View raw web search results (for manual review)"):
+                    for _i, _item in enumerate(_research.get('snippets', []), 1):
+                        st.markdown(f"**Result {_i}** — _{_item['query']}_")
+                        st.write(f"Source: {_item['source']}")
+                        st.write(_item['snippet'])
+                        st.divider()
 
 # ===============================================
 # TAB 2 — LEAD MATCHING (placeholder)
