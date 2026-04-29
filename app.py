@@ -6,11 +6,25 @@ from datetime import datetime
 import io
 import re
 import difflib
+import json
+from openai import AzureOpenAI
 
 # -----------------------------------------------
 # PAGE CONFIG
 # -----------------------------------------------
 st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", page_icon="🏦")
+
+# -----------------------------------------------
+# AZURE OPENAI CLIENT
+# -----------------------------------------------
+try:
+    client = AzureOpenAI(
+        api_key=st.secrets["azure_openai"]["api_key"],
+        azure_endpoint=st.secrets["azure_openai"]["endpoint"],
+        api_version=st.secrets["azure_openai"]["api_version"],
+    )
+except Exception:
+    client = None
 
 # -----------------------------------------------
 # FENERGO BRAND STYLING
@@ -885,6 +899,56 @@ def web_research(account_name):
     return data
 
 # -----------------------------------------------
+# LLM FIRMOGRAPHIC EXTRACTION
+# -----------------------------------------------
+def enrich_with_llm(snippets, account_name):
+    """Send DuckDuckGo snippets to Azure OpenAI and extract structured
+    firmographic data.  Falls back gracefully if the API call fails."""
+    system_prompt = f"""You are a financial-services data analyst. Given web search snippets about a company, extract structured firmographic data and return it as a single JSON object with exactly these keys:
+- legal_name: full registered legal name (string or null)
+- country_hq: ISO country name of headquarters (string or null)
+- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m" (string or null)
+- employees: headcount as integer or human-readable string like "12,500" (string or null)
+- aum_eur: assets under management as a human-readable string like "€1.2tn" or "N/A" if not applicable (string)
+- ultimate_parent: name of the ultimate parent company (string or null)
+- ultimate_parent_hq: country of the ultimate parent HQ (string or null)
+- detailed_business_segment: must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}
+- business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)}
+- market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
+
+Use null for fields you cannot determine from the snippets. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
+
+    snippets_text = "\n\n".join(
+        f"[Query: {s['query']}]\nSource: {s['source']}\n{s['snippet']}"
+        for s in snippets
+    )
+    user_message = f"Company: {account_name}\n\nWeb search results:\n{snippets_text}"
+
+    try:
+        if client is None:
+            return {"_llm_error": "Azure OpenAI client not configured"}
+        response = client.chat.completions.create(
+            model=st.secrets["azure_openai"]["deployment_name"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        extracted = json.loads(response.choices[0].message.content)
+        result = {}
+        for key in ("legal_name", "country_hq", "annual_revenue_eur", "employees",
+                    "aum_eur", "ultimate_parent", "ultimate_parent_hq",
+                    "detailed_business_segment", "business_segment", "market_segment"):
+            val = extracted.get(key)
+            if val is not None and str(val).strip():
+                result[key] = str(val).strip()
+        return result
+    except Exception as e:
+        return {"_llm_error": str(e)}
+
+# -----------------------------------------------
 # FULL SEGMENTATION
 # -----------------------------------------------
 def apply_segmentation(research_data, account_name="", region="", country=""):
@@ -1218,6 +1282,30 @@ with tab1:
                                 label=f"Step 2: Web research complete ({len(_research['sources'])} sources)",
                                 state="complete",
                             )
+                    # Step 2b — LLM extraction (only when web research succeeded)
+                    if 'error' not in _research and _research.get('snippets'):
+                        with st.status(
+                            "Step 2b: Extracting firmographic data with AI...", expanded=True
+                        ) as _llm_status:
+                            st.write("Sending snippets to Azure OpenAI (GPT-4o-mini)...")
+                            _llm_data = enrich_with_llm(_research['snippets'], _account_name)
+                            if '_llm_error' in _llm_data:
+                                st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
+                                _llm_status.update(
+                                    label="Step 2b: AI extraction skipped (using raw data)",
+                                    state="error",
+                                )
+                            else:
+                                _empty = {None, 'Not found', 'N/A', ''}
+                                _fields_found = [k for k, v in _llm_data.items() if v not in _empty]
+                                for _key, _val in _llm_data.items():
+                                    if _val not in _empty:
+                                        _research[_key] = _val
+                                st.write(f"Extracted {len(_fields_found)} firmographic field(s): {', '.join(_fields_found)}")
+                                _llm_status.update(
+                                    label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
+                                    state="complete",
+                                )
                     st.session_state["tab1_research"] = _research
 
                 # Step 3 — Segmentation (run once, cache in session state)
