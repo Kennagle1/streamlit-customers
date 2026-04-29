@@ -903,8 +903,28 @@ def web_research(account_name):
 # -----------------------------------------------
 def enrich_with_llm(snippets, account_name):
     """Send DuckDuckGo snippets to Azure OpenAI and extract structured
-    firmographic data.  Falls back gracefully if the API call fails."""
-    system_prompt = f"""You are a financial-services data analyst. Given web search snippets about a company, extract structured firmographic data and return it as a single JSON object with exactly these keys:
+    firmographic data.  When no snippets are available, falls back to
+    the LLM's own training knowledge.  Falls back gracefully if the API
+    call fails."""
+    use_knowledge_fallback = not snippets
+
+    if use_knowledge_fallback:
+        system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions. Extract structured firmographic data about the named company from your training knowledge and return it as a single JSON object with exactly these keys:
+- legal_name: full registered legal name (string or null)
+- country_hq: ISO country name of headquarters (string or null)
+- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m" (string or null)
+- employees: headcount as integer or human-readable string like "12,500" (string or null)
+- aum_eur: assets under management as a human-readable string like "€1.2tn" or "N/A" if not applicable (string)
+- ultimate_parent: name of the ultimate parent company (string or null)
+- ultimate_parent_hq: country of the ultimate parent HQ (string or null)
+- detailed_business_segment: must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}
+- business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)}
+- market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
+
+Use null for fields you cannot determine. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
+        user_message = f"Company: {account_name}\n\nNo web search results were available. Please use your training knowledge to populate as many fields as possible."
+    else:
+        system_prompt = f"""You are a financial-services data analyst. Given web search snippets about a company, extract structured firmographic data and return it as a single JSON object with exactly these keys:
 - legal_name: full registered legal name (string or null)
 - country_hq: ISO country name of headquarters (string or null)
 - annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m" (string or null)
@@ -917,12 +937,11 @@ def enrich_with_llm(snippets, account_name):
 - market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
 
 Use null for fields you cannot determine from the snippets. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
-
-    snippets_text = "\n\n".join(
-        f"[Query: {s['query']}]\nSource: {s['source']}\n{s['snippet']}"
-        for s in snippets
-    )
-    user_message = f"Company: {account_name}\n\nWeb search results:\n{snippets_text}"
+        snippets_text = "\n\n".join(
+            f"[Query: {s['query']}]\nSource: {s['source']}\n{s['snippet']}"
+            for s in snippets
+        )
+        user_message = f"Company: {account_name}\n\nWeb search results:\n{snippets_text}"
 
     try:
         if client is None:
@@ -1282,12 +1301,22 @@ with tab1:
                                 label=f"Step 2: Web research complete ({len(_research['sources'])} sources)",
                                 state="complete",
                             )
-                    # Step 2b — LLM extraction (only when web research succeeded)
-                    if 'error' not in _research and _research.get('snippets'):
-                        with st.status(
-                            "Step 2b: Extracting firmographic data with AI...", expanded=True
-                        ) as _llm_status:
-                            st.write("Sending snippets to Azure OpenAI (GPT-4o-mini)...")
+                    # Step 2b — LLM extraction (always run; falls back to LLM knowledge when no snippets)
+                    if 'error' not in _research:
+                        _has_snippets = bool(_research.get('snippets'))
+                        _step2b_label = (
+                            "Step 2b: Extracting firmographic data with AI..."
+                            if _has_snippets
+                            else "Step 2b: No web results — using AI knowledge base..."
+                        )
+                        with st.status(_step2b_label, expanded=True) as _llm_status:
+                            if _has_snippets:
+                                st.write("Sending snippets to Azure OpenAI (GPT-4o-mini)...")
+                            else:
+                                st.write(
+                                    "Web search returned no results. Querying Azure OpenAI "
+                                    "using its training knowledge about this company..."
+                                )
                             _llm_data = enrich_with_llm(_research['snippets'], _account_name)
                             if '_llm_error' in _llm_data:
                                 st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
