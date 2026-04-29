@@ -902,39 +902,51 @@ def web_research(account_name):
 # LLM FIRMOGRAPHIC EXTRACTION
 # -----------------------------------------------
 def enrich_with_llm(snippets, account_name):
-    """Send DuckDuckGo snippets to Azure OpenAI and extract structured
-    firmographic data.  When no snippets are available, falls back to
-    the LLM's own training knowledge.  Falls back gracefully if the API
-    call fails."""
+    """Send web snippets to Azure OpenAI and extract structured firmographic
+    data.  When no snippets are available, falls back to the LLM's own
+    training knowledge (with explicit freshness instruction).  Falls back
+    gracefully if the API call fails.
+
+    Architecture note — Bing grounding:
+    When IT enables the Bing Search resource, add [bing] secrets and the
+    extra_body block below will activate automatically, replacing the
+    training-data fallback with live Bing-grounded responses.
+    """
     use_knowledge_fallback = not snippets
 
-    if use_knowledge_fallback:
-        system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions. Extract structured firmographic data about the named company from your training knowledge and return it as a single JSON object with exactly these keys:
-- legal_name: full registered legal name (string or null)
+    # Shared JSON field definitions used in both prompt variants
+    _fields = f"""- legal_name: full registered legal name (string or null)
 - country_hq: ISO country name of headquarters (string or null)
-- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m" (string or null)
-- employees: headcount as integer or human-readable string like "12,500" (string or null)
-- aum_eur: assets under management as a human-readable string like "€1.2tn" or "N/A" if not applicable (string)
-- ultimate_parent: name of the ultimate parent company (string or null)
+- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m"; include the data year if known, e.g. "€4.5bn (FY2024)" (string or null)
+- employees: headcount as integer or human-readable string like "12,500"; include the data year if known, e.g. "12,500 (2024)" (string or null)
+- aum_eur: assets under management as a human-readable string like "€1.2tn"; include the data year if known; use "N/A" if not applicable to this company type, or null if unknown (string or null)
+- ultimate_parent: full legal name of the ultimate parent / group holding company at the very top of the corporate ownership chain (e.g. "Bank of Ireland Group plc" for "Bank of Ireland"). Research the corporate group structure carefully. Return null only if the company is independently owned with no parent. (string or null)
 - ultimate_parent_hq: country of the ultimate parent HQ (string or null)
 - detailed_business_segment: must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}
 - business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)}
 - market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
+- industry_classification_rationale: a 1-2 sentence explanation of why you chose the detailed_business_segment value for this company (string or null)
+- sources: a JSON object with keys "revenue_source", "employees_source", "aum_source" — each value should be the URL of the source used for that data point, or null if unavailable (object)"""
+
+    if use_knowledge_fallback:
+        system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions.
+
+IMPORTANT: Always use the most recent publicly available data. Specify the year/date of the data where possible.
+
+For ultimate_parent: research the full corporate group ownership structure. Many banks and financial institutions trade under a commercial name but are owned by a listed holding company (e.g. "Bank of Ireland" is owned by "Bank of Ireland Group plc"). Always return the top-level listed or registered entity, not the operating subsidiary.
+
+Extract structured firmographic data about the named company and return it as a single JSON object with exactly these keys:
+{_fields}
 
 Use null for fields you cannot determine. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
-        user_message = f"Company: {account_name}\n\nNo web search results were available. Please use your training knowledge to populate as many fields as possible."
+        user_message = f"Company: {account_name}\n\nNo web search results were available. Please use your knowledge to populate as many fields as possible with the most up-to-date data you have."
     else:
         system_prompt = f"""You are a financial-services data analyst. Given web search snippets about a company, extract structured firmographic data and return it as a single JSON object with exactly these keys:
-- legal_name: full registered legal name (string or null)
-- country_hq: ISO country name of headquarters (string or null)
-- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m" (string or null)
-- employees: headcount as integer or human-readable string like "12,500" (string or null)
-- aum_eur: assets under management as a human-readable string like "€1.2tn" or "N/A" if not applicable (string)
-- ultimate_parent: name of the ultimate parent company (string or null)
-- ultimate_parent_hq: country of the ultimate parent HQ (string or null)
-- detailed_business_segment: must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}
-- business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)}
-- market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
+{_fields}
+
+IMPORTANT: Always prefer the most recent data available in the snippets. Specify the year/date of the data where possible.
+
+For ultimate_parent: research the full corporate group ownership structure carefully using the snippets. Many banks trade under a commercial name but are owned by a listed holding company (e.g. "Bank of Ireland" → "Bank of Ireland Group plc"). Always return the top-level entity.
 
 Use null for fields you cannot determine from the snippets. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
         snippets_text = "\n\n".join(
@@ -946,7 +958,26 @@ Use null for fields you cannot determine from the snippets. For segment fields, 
     try:
         if client is None:
             return {"_llm_error": "Azure OpenAI client not configured"}
-        response = client.chat.completions.create(
+
+        # If Bing Search resource is configured, use grounded search for live web data.
+        # Add [bing] section to Streamlit secrets to activate this path automatically.
+        bing_config = st.secrets.get("bing", {})
+        extra_body = None
+        _bing_key = bing_config.get("api_key") if isinstance(bing_config, dict) else None
+        if _bing_key and isinstance(_bing_key, str) and _bing_key.strip():
+            extra_body = {
+                "data_sources": [{
+                    "type": "bing_search",
+                    "parameters": {
+                        "api_key": _bing_key.strip(),
+                        "endpoint": str(bing_config.get("endpoint", "https://api.bing.microsoft.com/")).strip()
+                    }
+                }]
+            }
+
+        # GPT-4o is recommended over GPT-4o-mini for best accuracy on structured extraction.
+        # Update the deployment_name secret to switch models without any code change.
+        create_kwargs = dict(
             model=st.secrets["azure_openai"]["deployment_name"],
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -955,14 +986,23 @@ Use null for fields you cannot determine from the snippets. For segment fields, 
             response_format={"type": "json_object"},
             temperature=0,
         )
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
+
+        response = client.chat.completions.create(**create_kwargs)
         extracted = json.loads(response.choices[0].message.content)
         result = {}
         for key in ("legal_name", "country_hq", "annual_revenue_eur", "employees",
                     "aum_eur", "ultimate_parent", "ultimate_parent_hq",
-                    "detailed_business_segment", "business_segment", "market_segment"):
+                    "detailed_business_segment", "business_segment", "market_segment",
+                    "industry_classification_rationale"):
             val = extracted.get(key)
             if val is not None and str(val).strip():
                 result[key] = str(val).strip()
+        # Preserve sources dict as-is (not coerced to string)
+        sources = extracted.get("sources")
+        if isinstance(sources, dict):
+            result["sources"] = sources
         return result
     except Exception as e:
         return {"_llm_error": str(e)}
@@ -1290,6 +1330,16 @@ with tab1:
                         if 'error' in _research:
                             st.error(f"Search error: {_research['error']}")
                             _status.update(label="Step 2: Web research failed", state="error")
+                        elif not _research.get('snippets'):
+                            st.info(
+                                "Web search unavailable — proceeding with AI analysis. "
+                                "(DuckDuckGo is rate-limited on Streamlit Cloud. "
+                                "Add [bing] secrets to enable live Bing Search grounding.)"
+                            )
+                            _status.update(
+                                label="Step 2: Web search unavailable — AI analysis will proceed",
+                                state="complete",
+                            )
                         else:
                             st.write(
                                 f"Retrieved {len(_research['snippets'])} results from "
@@ -1307,15 +1357,15 @@ with tab1:
                         _step2b_label = (
                             "Step 2b: Extracting firmographic data with AI..."
                             if _has_snippets
-                            else "Step 2b: No web results — using AI knowledge base..."
+                            else "Step 2b: Querying Azure OpenAI for firmographic data..."
                         )
                         with st.status(_step2b_label, expanded=True) as _llm_status:
                             if _has_snippets:
-                                st.write("Sending snippets to Azure OpenAI (GPT-4o-mini)...")
+                                st.write("Sending snippets to Azure OpenAI for structured extraction...")
                             else:
                                 st.write(
-                                    "Web search returned no results. Querying Azure OpenAI "
-                                    "using its training knowledge about this company..."
+                                    "Web search unavailable — querying Azure OpenAI directly "
+                                    "for the most up-to-date firmographic data about this company..."
                                 )
                             _llm_data = enrich_with_llm(_research['snippets'], _account_name)
                             if '_llm_error' in _llm_data:
@@ -1326,10 +1376,16 @@ with tab1:
                                 )
                             else:
                                 _empty = {None, 'Not found', 'N/A', ''}
-                                _fields_found = [k for k, v in _llm_data.items() if v not in _empty]
+                                _fields_found = []
                                 for _key, _val in _llm_data.items():
-                                    if _val not in _empty:
+                                    # sources is a dict — store as-is without empty-value filtering
+                                    if _key == 'sources':
+                                        if isinstance(_val, dict):
+                                            _research[_key] = _val
+                                            _fields_found.append(_key)
+                                    elif _val not in _empty:
                                         _research[_key] = _val
+                                        _fields_found.append(_key)
                                 st.write(f"Extracted {len(_fields_found)} firmographic field(s): {', '.join(_fields_found)}")
                                 _llm_status.update(
                                     label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
@@ -1376,28 +1432,72 @@ with tab1:
                 )
 
                 # ── Salesforce-mirrored layout ──────────────────────────────────
-                _aum_segs = ['Full-Service Banks', 'Banks', 'Asset Mgmt., Servicing & Insurance']
-                _show_aum = _research.get('market_segment', '') in _aum_segs
-
                 _seg     = _segmentation.get('customer_segment', '')
                 _colour  = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(_seg, "⚪")
                 _seg_display = f"{_colour} {_seg}" if _seg else ""
                 _rationale   = _segmentation.get('customer_segment_rationale', '')
 
-                def _sf_field(label, value, greyed=False, note=None):
-                    """Return HTML for one Salesforce-style field cell."""
+                # Source URLs returned by LLM (dict or None)
+                _llm_sources = _research.get('sources', {})
+                if not isinstance(_llm_sources, dict):
+                    _llm_sources = {}
+
+                _URL_DISPLAY_MAX = 60  # max chars to show for a source URL before truncating
+
+                def _source_link_html(url):
+                    """Return a small HTML link for a source URL, or empty string."""
+                    if url and isinstance(url, str) and url.startswith('http'):
+                        display = url if len(url) <= _URL_DISPLAY_MAX else url[:_URL_DISPLAY_MAX - 3] + '...'
+                        return (
+                            f'<div class="sf-field-note">'
+                            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+                            f'style="font-size:0.75rem;color:#21CFB2;">🔗 {display}</a>'
+                            f'</div>'
+                        )
+                    return ''
+
+                def _sf_field(label, value, greyed=False, note=None, source_url=None, highlight=None):
+                    """Return HTML for one Salesforce-style field cell.
+
+                    highlight: 'green' | 'red' | None — applies a background tint to the value.
+                    source_url: optional URL rendered as a small clickable link below the value.
+                    """
                     css_class    = "sf-field sf-greyed" if greyed else "sf-field"
                     value_stripped = str(value).strip()
                     value_string = value_stripped if value and value_stripped not in ('', 'N/A') else "—"
                     value_class  = "sf-field-value sf-empty" if value_string == "—" else "sf-field-value"
                     note_html    = f'<div class="sf-field-note">{note}</div>' if note else ""
+                    src_html     = _source_link_html(source_url)
+                    if highlight == 'green':
+                        hl_style = 'background:#d4edda;color:#155724;padding:2px 6px;border-radius:4px;'
+                    elif highlight == 'red':
+                        hl_style = 'background:#f8d7da;color:#721c24;padding:2px 6px;border-radius:4px;'
+                    else:
+                        hl_style = ''
+                    value_inner = (
+                        f'<span style="{hl_style}">{value_string}</span>'
+                        if hl_style and value_string != "—"
+                        else value_string
+                    )
                     return (
                         f'<div class="{css_class}">'
                         f'<div class="sf-field-label">{label}</div>'
-                        f'<div class="{value_class}">{value_string}</div>'
+                        f'<div class="{value_class}">{value_inner}</div>'
                         f'{note_html}'
+                        f'{src_html}'
                         f'</div>'
                     )
+
+                # Account Category colour coding (Issue 7)
+                # Use word-boundary regex to avoid false positives like "cat 12" → "cat 1"
+                _acct_cat_val = _segmentation.get('account_category', '')
+                _acct_cat_lower = str(_acct_cat_val).lower()
+                if re.search(r'\bcat\s*[12]\b', _acct_cat_lower):
+                    _acct_cat_highlight = 'green'
+                elif re.search(r'\bcat\s*3\b', _acct_cat_lower):
+                    _acct_cat_highlight = 'red'
+                else:
+                    _acct_cat_highlight = None
 
                 # Section 1 — About The Account (6 rows × 2 columns)
                 _s1_left = [
@@ -1414,27 +1514,40 @@ with tab1:
                     _sf_field("Detailed Business Segment", _research.get('detailed_business_segment', '')),
                     _sf_field("Customer Segment",          _seg_display,
                               note=_rationale if _rationale else None),
-                    _sf_field("Account Category",          _segmentation.get('account_category', '')),
+                    _sf_field("Account Category",          _acct_cat_val,
+                              note=_segmentation.get('account_category_note', '') or None,
+                              highlight=_acct_cat_highlight),
                     _sf_field("Priority Account",          "",  greyed=True),
                 ]
                 _s1_cells = "".join(left_cell + right_cell for left_cell, right_cell in zip(_s1_left, _s1_right))
 
+                # AUM: always visible; show "N/A — not applicable" when LLM flags it as N/A
+                _aum_raw = _research.get('aum_eur', '')
+                _aum_display = (
+                    "N/A — not applicable"
+                    if str(_aum_raw).strip().upper() in ('N/A', 'NOT FOUND', 'NOT APPLICABLE', '')
+                    else _aum_raw
+                )
+
                 # Section 2 — Supplementary Account Information (4 rows + rationale row)
-                _aum_val = _research.get('aum_eur', '') if _show_aum else ""
                 _s2_rows = [
                     (_sf_field("BvD ID (Moody's)", "",  greyed=True),
                      _sf_field("Account ID",        "",  greyed=True)),
                     (_sf_field("NAICS Code",         "",  greyed=True),
-                     _sf_field("Annual Revenue",     _research.get('annual_revenue_eur', ''))),
+                     _sf_field("Annual Revenue",     _research.get('annual_revenue_eur', ''),
+                               source_url=_llm_sources.get('revenue_source'))),
                     (_sf_field("Legal Name (BvD)",   _research.get('legal_name', '')),
-                     _sf_field("Employees",          _research.get('employees', ''))),
+                     _sf_field("Employees",          _research.get('employees', ''),
+                               source_url=_llm_sources.get('employees_source'))),
                     (_sf_field("Ultimate Parent",    _research.get('ultimate_parent', '')),
-                     _sf_field("AUM (EUR)",          _aum_val, greyed=not _show_aum)),
+                     _sf_field("AUM (EUR)",          _aum_display,
+                               source_url=_llm_sources.get('aum_source'))),
                 ]
                 _s2_cells = "".join(left_cell + right_cell for left_cell, right_cell in _s2_rows)
                 # Industry Classification Rationale spans left column only
                 _s2_cells += (
-                    _sf_field("Industry Classification Rationale", "", greyed=True)
+                    _sf_field("Industry Classification Rationale",
+                              _research.get('industry_classification_rationale', ''))
                     + '<div class="sf-field"></div>'
                 )
 
