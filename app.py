@@ -148,6 +148,69 @@ st.markdown("""
     }
     .placeholder-box h3 { color: #002E33; font-size: 1.3rem; }
     .placeholder-box p { color: #5a7a7a; font-size: 0.95rem; }
+
+    /* Salesforce-mirrored layout */
+    .sf-layout {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin-top: 8px;
+    }
+    .sf-section {
+        background: #ffffff;
+        border: 1px solid #dddbda;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        overflow: hidden;
+    }
+    .sf-section-header {
+        background-color: #f3f3f3;
+        border-bottom: 1px solid #dddbda;
+        padding: 8px 16px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #3e3e3c;
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+    }
+    .sf-fields-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+    .sf-field {
+        padding: 10px 16px;
+        border-bottom: 1px solid #f3f3f3;
+        min-height: 52px;
+    }
+    .sf-field-label {
+        font-size: 0.7rem;
+        color: #706e6b;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-bottom: 3px;
+        font-weight: 600;
+    }
+    .sf-field-value {
+        font-size: 0.88rem;
+        color: #181818;
+        font-weight: 500;
+        line-height: 1.3;
+    }
+    .sf-field-value.sf-empty {
+        color: #c9c7c5;
+    }
+    .sf-field.sf-greyed .sf-field-label {
+        color: #c9c7c5;
+    }
+    .sf-field.sf-greyed .sf-field-value {
+        color: #c9c7c5;
+    }
+    .sf-field-note {
+        font-size: 0.73rem;
+        color: #706e6b;
+        margin-top: 4px;
+        font-style: italic;
+        line-height: 1.3;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1181,84 +1244,80 @@ with tab1:
                     unsafe_allow_html=True,
                 )
 
-                _col_a, _col_b = st.columns(2)
+                # ── Salesforce-mirrored layout ──────────────────────────────────
+                _aum_segs = ['Full-Service Banks', 'Banks', 'Asset Mgmt., Servicing & Insurance']
+                _show_aum = _research.get('market_segment', '') in _aum_segs
 
-                with _col_a:
-                    st.markdown(
-                        '<div class="fen-card"><h4>Segment Information</h4>',
-                        unsafe_allow_html=True,
-                    )
-                    st.dataframe(pd.DataFrame({
-                        "Field": ["Detailed Business Segment", "Business Segment", "Market Segment"],
-                        "Value": [
-                            _research.get('detailed_business_segment', 'N/A'),
-                            _research.get('business_segment', 'N/A'),
-                            _research.get('market_segment', 'N/A'),
-                        ]
-                    }), use_container_width=True, hide_index=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                _seg     = _segmentation.get('customer_segment', '')
+                _colour  = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(_seg, "⚪")
+                _seg_display = f"{_colour} {_seg}" if _seg else ""
+                _rationale   = _segmentation.get('customer_segment_rationale', '')
 
-                    st.markdown(
-                        '<div class="fen-card"><h4>Parent Information</h4>',
-                        unsafe_allow_html=True,
+                def _sf_field(label, value, greyed=False, note=None):
+                    """Return HTML for one Salesforce-style field cell."""
+                    cls     = "sf-field sf-greyed" if greyed else "sf-field"
+                    val_str = str(value).strip() if value and str(value).strip() not in ('', 'N/A') else "—"
+                    val_cls = "sf-field-value sf-empty" if val_str == "—" else "sf-field-value"
+                    note_html = f'<div class="sf-field-note">{note}</div>' if note else ""
+                    return (
+                        f'<div class="{cls}">'
+                        f'<div class="sf-field-label">{label}</div>'
+                        f'<div class="{val_cls}">{val_str}</div>'
+                        f'{note_html}'
+                        f'</div>'
                     )
-                    st.dataframe(pd.DataFrame({
-                        "Field": ["Ultimate Parent", "Ultimate Parent HQ"],
-                        "Value": [
-                            _research.get('ultimate_parent', 'N/A'),
-                            _research.get('ultimate_parent_hq', 'N/A'),
-                        ]
-                    }), use_container_width=True, hide_index=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
 
-                with _col_b:
-                    st.markdown(
-                        '<div class="fen-card"><h4>Company Metrics</h4>',
-                        unsafe_allow_html=True,
-                    )
-                    _aum_segs = ['Full-Service Banks', 'Banks', 'Asset Mgmt., Servicing & Insurance']
-                    _show_aum = _research.get('market_segment', '') in _aum_segs
-                    _metrics_fields = ["Legal Name", "Country HQ", "Annual Revenue (EUR)", "Employees"]
-                    _metrics_values = [
-                        _research.get('legal_name', 'N/A'),
-                        _research.get('country_hq', 'N/A'),
-                        _research.get('annual_revenue_eur', 'N/A'),
-                        _research.get('employees', 'N/A'),
-                    ]
-                    if _show_aum:
-                        _metrics_fields.append("AUM (EUR)")
-                        _metrics_values.append(_research.get('aum_eur', 'N/A'))
-                    st.dataframe(pd.DataFrame({
-                        "Field": _metrics_fields,
-                        "Value": _metrics_values,
-                    }), use_container_width=True, hide_index=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                # Section 1 — About The Account (6 rows × 2 columns)
+                _s1_left = [
+                    _sf_field("Account Name",            _account_name),
+                    _sf_field("Account Type",            _account_type),
+                    _sf_field("Parent Account",          "",  greyed=True),
+                    _sf_field("Reporting Group",         "",  greyed=True),
+                    _sf_field("Account Owner",           "",  greyed=True),
+                    _sf_field("Secondary Account Owner", _segmentation.get('secondary_account_owner', '')),
+                ]
+                _s1_right = [
+                    _sf_field("Market Segment",            _research.get('market_segment', '')),
+                    _sf_field("Business Segment",          _research.get('business_segment', '')),
+                    _sf_field("Detailed Business Segment", _research.get('detailed_business_segment', '')),
+                    _sf_field("Customer Segment",          _seg_display,
+                              note=_rationale if _rationale else None),
+                    _sf_field("Account Category",          _segmentation.get('account_category', '')),
+                    _sf_field("Priority Account",          "",  greyed=True),
+                ]
+                _s1_cells = "".join(l + r for l, r in zip(_s1_left, _s1_right))
 
-                    st.markdown(
-                        '<div class="fen-card"><h4>Account Categorisation</h4>',
-                        unsafe_allow_html=True,
-                    )
-                    _seg    = _segmentation.get('customer_segment', 'N/A')
-                    _colour = {"Enterprise": "🔵", "Mid-Market": "🟡", "Scale-up": "🟢"}.get(
-                        _seg, "⚪"
-                    )
-                    st.dataframe(pd.DataFrame({
-                        "Field": [
-                            "Customer Segment",
-                            "Segment Rationale",
-                            "Account Category",
-                            "Account Category Note",
-                            "Secondary Account Owner",
-                        ],
-                        "Value": [
-                            f"{_colour} {_seg}",
-                            _segmentation.get('customer_segment_rationale', 'N/A'),
-                            _segmentation.get('account_category', 'N/A'),
-                            _segmentation.get('account_category_note', 'N/A'),
-                            _segmentation.get('secondary_account_owner', 'N/A'),
-                        ]
-                    }), use_container_width=True, hide_index=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
+                # Section 2 — Supplementary Account Information (4 rows + rationale row)
+                _aum_val = _research.get('aum_eur', '') if _show_aum else ""
+                _s2_rows = [
+                    (_sf_field("BvD ID (Moody's)", "",  greyed=True),
+                     _sf_field("Account ID",        "",  greyed=True)),
+                    (_sf_field("NAICS Code",         "",  greyed=True),
+                     _sf_field("Annual Revenue",     _research.get('annual_revenue_eur', ''))),
+                    (_sf_field("Legal Name (BvD)",   _research.get('legal_name', '')),
+                     _sf_field("Employees",          _research.get('employees', ''))),
+                    (_sf_field("Ultimate Parent",    _research.get('ultimate_parent', '')),
+                     _sf_field("AUM (EUR)",          _aum_val, greyed=not _show_aum)),
+                ]
+                _s2_cells = "".join(l + r for l, r in _s2_rows)
+                # Industry Classification Rationale spans left column only
+                _s2_cells += (
+                    _sf_field("Industry Classification Rationale", "", greyed=True)
+                    + '<div class="sf-field"></div>'
+                )
+
+                st.markdown(f"""
+<div class="sf-layout">
+  <div class="sf-section">
+    <div class="sf-section-header">About The Account</div>
+    <div class="sf-fields-grid">{_s1_cells}</div>
+  </div>
+  <div class="sf-section">
+    <div class="sf-section-header">Supplementary Account Information</div>
+    <div class="sf-fields-grid">{_s2_cells}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
                 with st.expander("View raw web search results (for manual review)"):
                     for _i, _item in enumerate(_research.get('snippets', []), 1):
