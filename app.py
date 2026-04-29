@@ -1255,14 +1255,15 @@ with tab1:
 
                 def _sf_field(label, value, greyed=False, note=None):
                     """Return HTML for one Salesforce-style field cell."""
-                    cls     = "sf-field sf-greyed" if greyed else "sf-field"
-                    val_str = str(value).strip() if value and str(value).strip() not in ('', 'N/A') else "—"
-                    val_cls = "sf-field-value sf-empty" if val_str == "—" else "sf-field-value"
-                    note_html = f'<div class="sf-field-note">{note}</div>' if note else ""
+                    css_class    = "sf-field sf-greyed" if greyed else "sf-field"
+                    value_stripped = str(value).strip()
+                    value_string = value_stripped if value and value_stripped not in ('', 'N/A') else "—"
+                    value_class  = "sf-field-value sf-empty" if value_string == "—" else "sf-field-value"
+                    note_html    = f'<div class="sf-field-note">{note}</div>' if note else ""
                     return (
-                        f'<div class="{cls}">'
+                        f'<div class="{css_class}">'
                         f'<div class="sf-field-label">{label}</div>'
-                        f'<div class="{val_cls}">{val_str}</div>'
+                        f'<div class="{value_class}">{value_string}</div>'
                         f'{note_html}'
                         f'</div>'
                     )
@@ -1285,7 +1286,7 @@ with tab1:
                     _sf_field("Account Category",          _segmentation.get('account_category', '')),
                     _sf_field("Priority Account",          "",  greyed=True),
                 ]
-                _s1_cells = "".join(l + r for l, r in zip(_s1_left, _s1_right))
+                _s1_cells = "".join(left_cell + right_cell for left_cell, right_cell in zip(_s1_left, _s1_right))
 
                 # Section 2 — Supplementary Account Information (4 rows + rationale row)
                 _aum_val = _research.get('aum_eur', '') if _show_aum else ""
@@ -1299,7 +1300,7 @@ with tab1:
                     (_sf_field("Ultimate Parent",    _research.get('ultimate_parent', '')),
                      _sf_field("AUM (EUR)",          _aum_val, greyed=not _show_aum)),
                 ]
-                _s2_cells = "".join(l + r for l, r in _s2_rows)
+                _s2_cells = "".join(left_cell + right_cell for left_cell, right_cell in _s2_rows)
                 # Industry Classification Rationale spans left column only
                 _s2_cells += (
                     _sf_field("Industry Classification Rationale", "", greyed=True)
