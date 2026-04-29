@@ -69,6 +69,14 @@ st.markdown("""
         color: #002E33 !important;
     }
 
+    /* Sidebar uploaded file name — override white text so it's readable on the widget's light background */
+    section[data-testid="stSidebar"] .stFileUploader [data-testid="stFileUploaderFile"] {
+        color: #002E33 !important;
+    }
+    section[data-testid="stSidebar"] .stFileUploader [data-testid="stFileUploaderFile"] * {
+        color: #002E33 !important;
+    }
+
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: #002E33;
@@ -299,9 +307,9 @@ FINANCIAL_STOP_WORDS = {
 }
 
 COUNTRY_REGION_MAP = {
-    # UK & Ireland
-    "United Kingdom": "UK & Ireland",
-    "Ireland": "UK & Ireland",
+    # EMEA — UK & Ireland
+    "United Kingdom": "EMEA",
+    "Ireland": "EMEA",
     # EMEA — Western Europe
     "France": "EMEA", "Germany": "EMEA", "Netherlands": "EMEA",
     "Belgium": "EMEA", "Luxembourg": "EMEA", "Switzerland": "EMEA",
@@ -329,14 +337,14 @@ COUNTRY_REGION_MAP = {
     "Thailand": "APAC", "Indonesia": "APAC", "Philippines": "APAC",
     "Vietnam": "APAC", "Taiwan": "APAC", "Pakistan": "APAC",
     "Bangladesh": "APAC", "Sri Lanka": "APAC",
-    # Americas
-    "United States": "Americas", "Canada": "Americas",
-    "Mexico": "Americas", "Brazil": "Americas", "Argentina": "Americas",
-    "Chile": "Americas", "Colombia": "Americas", "Peru": "Americas",
-    "Uruguay": "Americas", "Venezuela": "Americas", "Ecuador": "Americas",
-    "Costa Rica": "Americas", "Panama": "Americas",
-    "Cayman Islands": "Americas", "Bermuda": "Americas",
-    "British Virgin Islands": "Americas",
+    # AMER
+    "United States": "AMER", "Canada": "AMER",
+    "Mexico": "AMER", "Brazil": "AMER", "Argentina": "AMER",
+    "Chile": "AMER", "Colombia": "AMER", "Peru": "AMER",
+    "Uruguay": "AMER", "Venezuela": "AMER", "Ecuador": "AMER",
+    "Costa Rica": "AMER", "Panama": "AMER",
+    "Cayman Islands": "AMER", "Bermuda": "AMER",
+    "British Virgin Islands": "AMER",
 }
 
 # -----------------------------------------------
@@ -928,7 +936,7 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
     cols = sf_accounts.columns.tolist()
     cols_lc = {c: c.lower().strip() for c in cols}
 
-    # Detect Account ID column — exact "account id" > "accountid" > "id"
+    # Detect Account ID column — exact "account id" > "accountid" > partial > "id"
     sf_id_col = None
     for c in cols:
         if cols_lc[c] == "account id":
@@ -937,6 +945,12 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
     if sf_id_col is None:
         for c in cols:
             if cols_lc[c] == "accountid":
+                sf_id_col = c
+                break
+    if sf_id_col is None:
+        for c in cols:
+            lc = cols_lc[c]
+            if "account" in lc and "id" in lc:
                 sf_id_col = c
                 break
     if sf_id_col is None:
