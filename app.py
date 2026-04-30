@@ -7,6 +7,7 @@ import io
 import re
 import difflib
 import json
+import requests
 from openai import AzureOpenAI
 
 # -----------------------------------------------
@@ -902,19 +903,21 @@ def web_research(account_name):
 # LLM FIRMOGRAPHIC EXTRACTION
 # -----------------------------------------------
 def enrich_with_llm(snippets, account_name):
-    """Send web snippets to Azure OpenAI and extract structured firmographic
-    data.  When no snippets are available, falls back to the LLM's own
-    training knowledge (with explicit freshness instruction).  Falls back
-    gracefully if the API call fails.
+    """Extract structured firmographic data using the Azure OpenAI Responses API
+    with the built-in web_search tool for live internet data.
 
-    Architecture note — Bing grounding:
-    When IT enables the Bing Search resource, add [bing] secrets and the
-    extra_body block below will activate automatically, replacing the
-    training-data fallback with live Bing-grounded responses.
+    Primary path: Responses API with web_search tool — searches the live web for
+    current employee counts, revenue figures, parent company info, etc.
+    Fallback: Chat Completions API (used if the Responses API call fails for any reason).
+
+    The `snippets` parameter accepts pre-fetched web snippets (e.g. from DuckDuckGo).
+    When `snippets` is empty, the LLM is prompted to search the web directly for all
+    fields. When snippets are provided, they are included as context and the LLM is
+    still instructed to supplement them with live web searches.
     """
     use_knowledge_fallback = not snippets
 
-    # Shared JSON field definitions used in both prompt variants
+    # Shared JSON field definitions
     _fields = f"""- legal_name: full registered legal name (string or null)
 - country_hq: ISO country name of headquarters (string or null)
 - annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m"; include the data year if known, e.g. "€4.5bn (FY2024)" (string or null)
@@ -928,10 +931,14 @@ def enrich_with_llm(snippets, account_name):
 - industry_classification_rationale: a 1-2 sentence explanation of why you chose the detailed_business_segment value for this company (string or null)
 - sources: a JSON object with keys "revenue_source", "employees_source", "aum_source" — each value should be the URL of the source used for that data point, or null if unavailable (object)"""
 
-    if use_knowledge_fallback:
-        system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions.
+    system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions.
 
-IMPORTANT: Always use the most recent publicly available data. Specify the year/date of the data where possible.
+Search the web for the most current publicly available information about this company.
+
+IMPORTANT:
+- For employee count and revenue, find the most recent figures available online, not from training data.
+- Include the year/date of the data where possible.
+- For each data point (revenue, employees, AUM), include the source URL where you found the information.
 
 For ultimate_parent: research the full corporate group ownership structure. Many banks and financial institutions trade under a commercial name but are owned by a listed holding company (e.g. "Bank of Ireland" is owned by "Bank of Ireland Group plc"). Always return the top-level listed or registered entity, not the operating subsidiary.
 
@@ -939,58 +946,117 @@ Extract structured firmographic data about the named company and return it as a 
 {_fields}
 
 Use null for fields you cannot determine. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
-        user_message = f"Company: {account_name}\n\nNo web search results were available. Please use your knowledge to populate as many fields as possible with the most up-to-date data you have."
+
+    if use_knowledge_fallback:
+        user_message = (
+            f"Company: {account_name}\n\n"
+            "Search the web for the most current publicly available information about this company. "
+            "Find the latest figures for revenue, employees, AUM, ultimate parent company, and all other fields. "
+            "For employee count and revenue, find the most recent figures available online. "
+            "Include the year/date of the data where possible."
+        )
     else:
-        system_prompt = f"""You are a financial-services data analyst. Given web search snippets about a company, extract structured firmographic data and return it as a single JSON object with exactly these keys:
-{_fields}
-
-IMPORTANT: Always prefer the most recent data available in the snippets. Specify the year/date of the data where possible.
-
-For ultimate_parent: research the full corporate group ownership structure carefully using the snippets. Many banks trade under a commercial name but are owned by a listed holding company (e.g. "Bank of Ireland" → "Bank of Ireland Group plc"). Always return the top-level entity.
-
-Use null for fields you cannot determine from the snippets. For segment fields, pick the single best match from the valid values list; use "Other" if none fits."""
         snippets_text = "\n\n".join(
             f"[Query: {s['query']}]\nSource: {s['source']}\n{s['snippet']}"
             for s in snippets
         )
-        user_message = f"Company: {account_name}\n\nWeb search results:\n{snippets_text}"
+        user_message = (
+            f"Company: {account_name}\n\n"
+            f"Preliminary web search results (these may be limited):\n{snippets_text}\n\n"
+            "Please also search the web directly for any missing or outdated information, "
+            "especially the most current employee count and revenue figures."
+        )
 
     try:
         if client is None:
             return {"_llm_error": "Azure OpenAI client not configured"}
 
-        # If Bing Search resource is configured, use grounded search for live web data.
-        # Add [bing] section to Streamlit secrets to activate this path automatically.
-        bing_config = st.secrets.get("bing", {})
-        extra_body = None
-        _bing_key = bing_config.get("api_key") if isinstance(bing_config, dict) else None
-        if _bing_key and isinstance(_bing_key, str) and _bing_key.strip():
-            extra_body = {
-                "data_sources": [{
-                    "type": "bing_search",
-                    "parameters": {
-                        "api_key": _bing_key.strip(),
-                        "endpoint": str(bing_config.get("endpoint", "https://api.bing.microsoft.com/")).strip()
-                    }
-                }]
+        extracted = None
+
+        # --- Primary path: Responses API with web_search tool for live internet data ---
+        try:
+            az_cfg = st.secrets["azure_openai"]
+            responses_url = (
+                f"{str(az_cfg['endpoint']).rstrip('/')}"
+                f"/openai/responses?api-version={az_cfg['api_version']}"
+            )
+            resp_headers = {
+                "Content-Type": "application/json",
+                "api-key": str(az_cfg["api_key"]),
             }
+            combined_input = (
+                f"{system_prompt}\n\n{user_message}\n\n"
+                "IMPORTANT: Use the web_search tool to find the most current, accurate data "
+                "available on the internet for this company. Do not rely on training data. "
+                "Return your response as a JSON object."
+            )
+            resp_body = {
+                "model": str(az_cfg["deployment_name"]),
+                "tools": [{"type": "web_search"}],
+                "input": combined_input,
+            }
+            resp = requests.post(
+                responses_url, headers=resp_headers, json=resp_body, timeout=120
+            )
+            resp.raise_for_status()
+            resp_data = resp.json()
 
-        # GPT-4o is recommended over GPT-4o-mini for best accuracy on structured extraction.
-        # Update the deployment_name secret to switch models without any code change.
-        create_kwargs = dict(
-            model=st.secrets["azure_openai"]["deployment_name"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        if extra_body:
-            create_kwargs["extra_body"] = extra_body
+            # Extract text from the output array
+            text_content = ""
+            for item in resp_data.get("output", []):
+                if item.get("type") == "message":
+                    for content_item in item.get("content", []):
+                        if content_item.get("type") == "output_text":
+                            text_content = content_item.get("text", "")
+                            break
+                    if text_content:
+                        break
 
-        response = client.chat.completions.create(**create_kwargs)
-        extracted = json.loads(response.choices[0].message.content)
+            # Strip markdown code fences if present (e.g. ```json ... ```)
+            if text_content.startswith("```"):
+                lines = text_content.split("\n")
+                if len(lines) >= 3:
+                    text_content = "\n".join(lines[1:-1])
+
+            extracted = json.loads(text_content)
+        except Exception:
+            pass  # Fall through to Chat Completions fallback below
+
+        # --- Fallback path: Chat Completions API ---
+        if extracted is None:
+            # If Bing Search resource is configured, use grounded search for live web data.
+            # Add [bing] section to Streamlit secrets to activate this path automatically.
+            bing_config = st.secrets.get("bing", {})
+            extra_body = None
+            _bing_key = bing_config.get("api_key") if isinstance(bing_config, dict) else None
+            if _bing_key and isinstance(_bing_key, str) and _bing_key.strip():
+                extra_body = {
+                    "data_sources": [{
+                        "type": "bing_search",
+                        "parameters": {
+                            "api_key": _bing_key.strip(),
+                            "endpoint": str(bing_config.get("endpoint", "https://api.bing.microsoft.com/")).strip()
+                        }
+                    }]
+                }
+
+            # GPT-4o is recommended over GPT-4o-mini for best accuracy on structured extraction.
+            # Update the deployment_name secret to switch models without any code change.
+            create_kwargs = dict(
+                model=st.secrets["azure_openai"]["deployment_name"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            if extra_body:
+                create_kwargs["extra_body"] = extra_body
+
+            response = client.chat.completions.create(**create_kwargs)
+            extracted = json.loads(response.choices[0].message.content)
+
         result = {}
         for key in ("legal_name", "country_hq", "annual_revenue_eur", "employees",
                     "aum_eur", "ultimate_parent", "ultimate_parent_hq",
@@ -1332,12 +1398,10 @@ with tab1:
                             _status.update(label="Step 2: Web research failed", state="error")
                         elif not _research.get('snippets'):
                             st.info(
-                                "Web search unavailable — proceeding with AI analysis. "
-                                "(DuckDuckGo is rate-limited on Streamlit Cloud. "
-                                "Add [bing] secrets to enable live Bing Search grounding.)"
+                                "Web search via DuckDuckGo unavailable — AI will search the web directly"
                             )
                             _status.update(
-                                label="Step 2: Web search unavailable — AI analysis will proceed",
+                                label="Step 2: Web search via DuckDuckGo unavailable — AI will search the web directly",
                                 state="complete",
                             )
                         else:
@@ -1351,22 +1415,11 @@ with tab1:
                                 label=f"Step 2: Web research complete ({len(_research['sources'])} sources)",
                                 state="complete",
                             )
-                    # Step 2b — LLM extraction (always run; falls back to LLM knowledge when no snippets)
+                    # Step 2b — LLM extraction with live web search
                     if 'error' not in _research:
-                        _has_snippets = bool(_research.get('snippets'))
-                        _step2b_label = (
-                            "Step 2b: Extracting firmographic data with AI..."
-                            if _has_snippets
-                            else "Step 2b: Querying Azure OpenAI for firmographic data..."
-                        )
+                        _step2b_label = "Step 2: Researching company with AI (live web search)..."
                         with st.status(_step2b_label, expanded=True) as _llm_status:
-                            if _has_snippets:
-                                st.write("Sending snippets to Azure OpenAI for structured extraction...")
-                            else:
-                                st.write(
-                                    "Web search unavailable — querying Azure OpenAI directly "
-                                    "for the most up-to-date firmographic data about this company..."
-                                )
+                            st.write("Querying Azure OpenAI with live web search for current firmographic data...")
                             _llm_data = enrich_with_llm(_research['snippets'], _account_name)
                             if '_llm_error' in _llm_data:
                                 st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
