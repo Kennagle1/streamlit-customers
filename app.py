@@ -977,69 +977,72 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         _responses_api_error = None
         _search_method = None
 
-        def _call_responses_api(api_version):
-            """Attempt a Responses API call with the given api_version. Returns extracted dict."""
-            az_cfg = st.secrets["azure_openai"]
-            responses_url = (
-                f"{str(az_cfg['endpoint']).rstrip('/')}"
-                f"/openai/responses?api-version={api_version}"
-            )
-            resp_headers = {
-                "Content-Type": "application/json",
-                "api-key": str(az_cfg["api_key"]),
-            }
-            combined_input = (
-                f"{system_prompt}\n\n{user_message}\n\n"
-                "IMPORTANT: Use the web_search tool to find the most current, accurate data "
-                "available on the internet for this company. Do not rely on training data. "
-                "Return your response as a JSON object."
-            )
-            resp_body = {
-                "model": str(az_cfg["deployment_name"]),
-                "tools": [{"type": "web_search"}],
-                "input": combined_input,
-            }
-            resp = requests.post(
-                responses_url, headers=resp_headers, json=resp_body, timeout=180
-            )
-            resp.raise_for_status()
-            resp_data = resp.json()
+        az_cfg = st.secrets["azure_openai"]
+        _endpoint_base = str(az_cfg['endpoint']).rstrip('/')
+        _deployment = str(az_cfg["deployment_name"])
+        _api_ver = str(az_cfg.get("api_version", "2025-03-01-preview"))
 
-            # Extract text from the output array
-            text_content = ""
-            for item in resp_data.get("output", []):
-                if item.get("type") == "message":
-                    for content_item in item.get("content", []):
-                        if content_item.get("type") == "output_text":
-                            text_content = content_item.get("text", "")
-                            break
-                    if text_content:
-                        break
+        # Endpoint candidates — try in order until one succeeds
+        responses_urls = list(dict.fromkeys([
+            # Format 1: Unified v1 spec (newest, no api-version needed)
+            f"{_endpoint_base}/openai/v1/responses",
+            # Format 2: Deployment-specific with api-version
+            f"{_endpoint_base}/openai/deployments/{_deployment}/responses?api-version={_api_ver}",
+            # Format 3: Global responses path with api-version
+            f"{_endpoint_base}/openai/responses?api-version={_api_ver}",
+            # Format 4: Try with known working preview version
+            f"{_endpoint_base}/openai/responses?api-version=2025-03-01-preview",
+        ]))
 
-            # Strip markdown code fences if present (e.g. ```json ... ```)
-            if text_content.startswith("```"):
-                lines = text_content.split("\n")
-                if len(lines) >= 3:
-                    text_content = "\n".join(lines[1:-1])
+        resp_headers = {
+            "Content-Type": "application/json",
+            "api-key": str(az_cfg["api_key"]),
+        }
+        combined_input = (
+            f"{system_prompt}\n\n{user_message}\n\n"
+            "IMPORTANT: Use the web_search tool to find the most current, accurate data "
+            "available on the internet for this company. Do not rely on training data. "
+            "Return your response as a JSON object."
+        )
+        resp_body = {
+            "model": _deployment,
+            "tools": [{"type": "web_search"}],
+            "input": combined_input,
+        }
 
-            return json.loads(text_content)
-
-        try:
-            az_cfg = st.secrets["azure_openai"]
-            configured_version = str(az_cfg.get("api_version", ""))
+        # Try each endpoint URL until one succeeds
+        for _url in responses_urls:
             try:
-                extracted = _call_responses_api(configured_version)
-            except requests.exceptions.HTTPError as _http_err:
-                # On 404 the configured api_version may not support the Responses API;
-                # retry automatically with the known-good preview version.
-                if _http_err.response is not None and _http_err.response.status_code == 404:
-                    extracted = _call_responses_api("2025-03-01-preview")
-                else:
-                    raise
-            _search_method = "responses_api_web_search"
-        except Exception as _exc:
-            _responses_api_error = str(_exc)
-            extracted = None  # Fall through to Chat Completions fallback below
+                resp = requests.post(_url, headers=resp_headers, json=resp_body, timeout=180)
+                resp.raise_for_status()
+                resp_data = resp.json()
+
+                # Extract text from the output array
+                text_content = ""
+                for item in resp_data.get("output", []):
+                    if item.get("type") == "message":
+                        for content_item in item.get("content", []):
+                            if content_item.get("type") == "output_text":
+                                text_content = content_item.get("text", "")
+                                break
+                        if text_content:
+                            break
+
+                # Strip markdown code fences if present (e.g. ```json ... ```)
+                if text_content.startswith("```"):
+                    lines = text_content.split("\n")
+                    if len(lines) >= 3:
+                        text_content = "\n".join(lines[1:-1])
+
+                extracted = json.loads(text_content)
+                _search_method = "responses_api_web_search"
+                break
+            except requests.exceptions.HTTPError as e:
+                _responses_api_error = f"{e} (tried: {_url})"
+                continue
+            except Exception as e:
+                _responses_api_error = f"{e} (tried: {_url})"
+                continue
 
         # --- Fallback path: Chat Completions API ---
         if extracted is None:
@@ -1104,6 +1107,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         result["_search_method"] = _search_method
         if _responses_api_error:
             result["_responses_api_error"] = _responses_api_error
+            result["_tried_urls"] = responses_urls
         return result
     except Exception as e:
         return {"_llm_error": str(e)}
@@ -1487,7 +1491,11 @@ with tab1:
                                         f"⚠️ Responses API failed, fell back to Chat Completions (training data only)"
                                     )
                                 if _resp_err:
-                                    st.caption(f"ℹ️ Responses API error: {_resp_err} — used Chat Completions fallback")
+                                    _tried = _llm_data.get('_tried_urls', [])
+                                    st.caption(
+                                        f"ℹ️ Tried {len(_tried)} endpoint format(s), all failed. "
+                                        f"Last error: {_resp_err}"
+                                    )
                                 _llm_status.update(
                                     label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
                                     state="complete",
@@ -1671,11 +1679,17 @@ with tab1:
                 if _search_method_display == "responses_api_web_search":
                     st.success("🌐 Data sourced from live web search")
                 elif _search_method_display == "chat_completions_fallback":
-                    _err_detail = f" Responses API error: {_resp_api_err_display}." if _resp_api_err_display else ""
+                    _tried_urls_display = _research.get('_tried_urls', [])
+                    _err_detail = f" Last error: {_resp_api_err_display}." if _resp_api_err_display else ""
                     st.warning(
                         f"⚠️ Data sourced from AI training data (may be outdated).{_err_detail} "
                         "Check your Azure OpenAI deployment supports the Responses API."
                     )
+                    if _tried_urls_display:
+                        st.caption(
+                            f"ℹ️ Tried {len(_tried_urls_display)} endpoint formats, all failed:\n"
+                            + "\n".join(f"  - {u}" for u in _tried_urls_display)
+                        )
 
                 with st.expander("View raw web search results (for manual review)"):
                     for _i, _item in enumerate(_research.get('snippets', []), 1):
