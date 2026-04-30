@@ -4,3 +4,4 @@ duckduckgo-search
 openpyxl
 rapidfuzz
 openai
+requests
