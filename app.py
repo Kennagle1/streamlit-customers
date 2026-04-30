@@ -974,11 +974,15 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         extracted = None
 
         # --- Primary path: Responses API with web_search tool for live internet data ---
-        try:
+        _responses_api_error = None
+        _search_method = None
+
+        def _call_responses_api(api_version):
+            """Attempt a Responses API call with the given api_version. Returns extracted dict."""
             az_cfg = st.secrets["azure_openai"]
             responses_url = (
                 f"{str(az_cfg['endpoint']).rstrip('/')}"
-                f"/openai/responses?api-version={az_cfg['api_version']}"
+                f"/openai/responses?api-version={api_version}"
             )
             resp_headers = {
                 "Content-Type": "application/json",
@@ -996,7 +1000,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 "input": combined_input,
             }
             resp = requests.post(
-                responses_url, headers=resp_headers, json=resp_body, timeout=120
+                responses_url, headers=resp_headers, json=resp_body, timeout=180
             )
             resp.raise_for_status()
             resp_data = resp.json()
@@ -1018,12 +1022,38 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 if len(lines) >= 3:
                     text_content = "\n".join(lines[1:-1])
 
-            extracted = json.loads(text_content)
-        except Exception:
-            pass  # Fall through to Chat Completions fallback below
+            return json.loads(text_content)
+
+        try:
+            az_cfg = st.secrets["azure_openai"]
+            configured_version = str(az_cfg.get("api_version", ""))
+            try:
+                extracted = _call_responses_api(configured_version)
+            except requests.exceptions.HTTPError as _http_err:
+                # On 404 the configured api_version may not support the Responses API;
+                # retry automatically with the known-good preview version.
+                if _http_err.response is not None and _http_err.response.status_code == 404:
+                    extracted = _call_responses_api("2025-03-01-preview")
+                else:
+                    raise
+            _search_method = "responses_api_web_search"
+        except Exception as _exc:
+            _responses_api_error = str(_exc)
+            extracted = None  # Fall through to Chat Completions fallback below
 
         # --- Fallback path: Chat Completions API ---
         if extracted is None:
+            # Build a modified system prompt that prohibits URL fabrication since this
+            # path has no internet access (only training data).
+            fallback_system_prompt = (
+                system_prompt
+                + "\n\nCRITICAL — NO INTERNET ACCESS IN THIS MODE:\n"
+                "- You do NOT have access to the internet. Do NOT fabricate or guess source URLs.\n"
+                "- For the sources object, set all values to null since you cannot verify any URLs.\n"
+                "- Clearly indicate that figures come from training data and may be outdated by "
+                "appending '(training data, may be outdated)' to revenue and employee values, "
+                "e.g. '€4.5bn (FY2023, training data, may be outdated)'."
+            )
             # If Bing Search resource is configured, use grounded search for live web data.
             # Add [bing] section to Streamlit secrets to activate this path automatically.
             bing_config = st.secrets.get("bing", {})
@@ -1045,7 +1075,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
             create_kwargs = dict(
                 model=st.secrets["azure_openai"]["deployment_name"],
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": fallback_system_prompt},
                     {"role": "user", "content": user_message},
                 ],
                 response_format={"type": "json_object"},
@@ -1056,6 +1086,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
 
             response = client.chat.completions.create(**create_kwargs)
             extracted = json.loads(response.choices[0].message.content)
+            _search_method = "chat_completions_fallback"
 
         result = {}
         for key in ("legal_name", "country_hq", "annual_revenue_eur", "employees",
@@ -1069,6 +1100,10 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         sources = extracted.get("sources")
         if isinstance(sources, dict):
             result["sources"] = sources
+        # Record which API path was used (for UI freshness indicator)
+        result["_search_method"] = _search_method
+        if _responses_api_error:
+            result["_responses_api_error"] = _responses_api_error
         return result
     except Exception as e:
         return {"_llm_error": str(e)}
@@ -1436,10 +1471,23 @@ with tab1:
                                         if isinstance(_val, dict):
                                             _research[_key] = _val
                                             _fields_found.append(_key)
+                                    elif _key.startswith('_'):
+                                        # Internal metadata keys (e.g. _search_method, _responses_api_error)
+                                        _research[_key] = _val
                                     elif _val not in _empty:
                                         _research[_key] = _val
                                         _fields_found.append(_key)
                                 st.write(f"Extracted {len(_fields_found)} firmographic field(s): {', '.join(_fields_found)}")
+                                _search_method_val = _llm_data.get('_search_method')
+                                _resp_err = _llm_data.get('_responses_api_error')
+                                if _search_method_val == "responses_api_web_search":
+                                    st.write("✅ Used Responses API with live web search")
+                                elif _search_method_val == "chat_completions_fallback":
+                                    st.warning(
+                                        f"⚠️ Responses API failed, fell back to Chat Completions (training data only)"
+                                    )
+                                if _resp_err:
+                                    st.caption(f"ℹ️ Responses API error: {_resp_err} — used Chat Completions fallback")
                                 _llm_status.update(
                                     label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
                                     state="complete",
@@ -1616,6 +1664,18 @@ with tab1:
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+                # Data freshness indicator
+                _search_method_display = _research.get('_search_method')
+                _resp_api_err_display = _research.get('_responses_api_error')
+                if _search_method_display == "responses_api_web_search":
+                    st.success("🌐 Data sourced from live web search")
+                elif _search_method_display == "chat_completions_fallback":
+                    _err_detail = f" Responses API error: {_resp_api_err_display}." if _resp_api_err_display else ""
+                    st.warning(
+                        f"⚠️ Data sourced from AI training data (may be outdated).{_err_detail} "
+                        "Check your Azure OpenAI deployment supports the Responses API."
+                    )
 
                 with st.expander("View raw web search results (for manual review)"):
                     for _i, _item in enumerate(_research.get('snippets', []), 1):
