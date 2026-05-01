@@ -1008,24 +1008,42 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 model="gpt-4.1",
                 tools=[{"type": "web_search_preview"}],
                 input=combined_input,
+                text={"format": {"type": "json_object"}},
             )
 
             # Use SDK's built-in property to extract text from the response
-            text_content = resp_data.output_text
-
-            if not text_content or not text_content.strip():
-                raise ValueError(f"Responses API returned empty text. Raw output: {repr(resp_data.output)}")
+            text_content = resp_data.output_text or ""
 
             # Strip markdown code fences if present (e.g. ```json ... ```)
+            text_content = text_content.strip()
             if text_content.startswith("```"):
                 lines = text_content.split("\n")
                 if len(lines) >= 3:
-                    text_content = "\n".join(lines[1:-1])
+                    text_content = "\n".join(lines[1:-1]).strip()
+
+            # Remove any citation annotations like 【4:0†source】
+            text_content = re.sub(r'【[^】]*】', '', text_content)
+
+            # If still not valid JSON, try to extract the JSON object
+            if text_content and not text_content.startswith("{"):
+                first_brace = text_content.find("{")
+                last_brace = text_content.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    text_content = text_content[first_brace:last_brace + 1]
+
+            if not text_content:
+                raise ValueError(f"Responses API returned empty text after cleanup. Raw output_text: {repr(resp_data.output_text)[:500]}")
 
             extracted = json.loads(text_content)
             _search_method = "responses_api_web_search"
         except Exception as e:
-            _responses_api_error = str(e)
+            _raw_preview = ""
+            try:
+                if 'resp_data' in locals():
+                    _raw_preview = f" | Raw output_text preview: {repr(resp_data.output_text)[:300]}"
+            except Exception:
+                pass
+            _responses_api_error = f"{e}{_raw_preview}"
 
         # --- Fallback path: Chat Completions API ---
         if extracted is None:
