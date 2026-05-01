@@ -9,6 +9,7 @@ import difflib
 import json
 import requests
 from openai import OpenAI
+import openai
 import traceback
 
 # -----------------------------------------------
@@ -475,6 +476,7 @@ else:
 # -----------------------------------------------
 with st.sidebar.expander("🔧 AI Debug Info"):
     st.markdown("**Model:** `gpt-4.1`")
+    st.markdown(f"**openai SDK:** `{openai.__version__}`")
     if client is not None:
         st.success("✅ OpenAI client initialised")
         if _openai_api_key_display:
@@ -1004,20 +1006,15 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         try:
             resp_data = client.responses.create(
                 model="gpt-4.1",
-                tools=[{"type": "web_search"}],
+                tools=[{"type": "web_search_preview"}],
                 input=combined_input,
             )
 
-            # Extract text from the output array
-            text_content = ""
-            for item in resp_data.output:
-                if item.type == "message":
-                    for content_item in item.content:
-                        if content_item.type == "output_text":
-                            text_content = content_item.text
-                            break
-                    if text_content:
-                        break
+            # Use SDK's built-in property to extract text from the response
+            text_content = resp_data.output_text
+
+            if not text_content or not text_content.strip():
+                raise ValueError(f"Responses API returned empty text. Raw output: {repr(resp_data.output)}")
 
             # Strip markdown code fences if present (e.g. ```json ... ```)
             if text_content.startswith("```"):

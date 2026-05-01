@@ -3,5 +3,5 @@ pandas
 duckduckgo-search
 openpyxl
 rapidfuzz
-openai
+openai>=1.66.0
 requests
