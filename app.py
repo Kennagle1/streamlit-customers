@@ -96,6 +96,36 @@ st.markdown("""
         color: #002E33 !important;
     }
 
+    /* Sidebar expander content — dark background so white text remains readable */
+    section[data-testid="stSidebar"] .streamlit-expanderContent {
+        background-color: #003a40 !important;
+    }
+    section[data-testid="stSidebar"] .streamlit-expanderContent * {
+        color: #ffffff !important;
+    }
+
+    /* Sidebar success/warning/error/info alert boxes — dark background with white text */
+    section[data-testid="stSidebar"] [data-testid="stAlert"] {
+        background-color: #003a40 !important;
+        border-color: #21CFB2 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stAlert"] * {
+        color: #ffffff !important;
+    }
+
+    /* Sidebar checkbox, radio, selectbox label text */
+    section[data-testid="stSidebar"] .stCheckbox label,
+    section[data-testid="stSidebar"] .stRadio label,
+    section[data-testid="stSidebar"] .stSelectbox label {
+        color: #ffffff !important;
+    }
+
+    /* Sidebar dataframe/table text */
+    section[data-testid="stSidebar"] [data-testid="stDataFrame"] * {
+        color: #002E33 !important;
+        background-color: #ffffff !important;
+    }
+
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: #002E33;
@@ -486,6 +516,19 @@ with st.sidebar.expander("🔧 AI Debug Info"):
         if _openai_init_error:
             st.code(_openai_init_error)
 
+    # Matrix diagnostic info
+    st.markdown("---")
+    st.markdown("**Matrix Lookup Debug:**")
+    if matrix_lookup:
+        _matrix_country_set = {k[0] for k in matrix_lookup.keys()}
+        st.markdown(f"Countries loaded: **{len(_matrix_country_set)}**")
+        _sample_keys = list(matrix_lookup.keys())[:5]
+        st.markdown("Sample keys (country, business_seg, customer_seg):")
+        for _sk in _sample_keys:
+            st.caption(f"`{_sk}`")
+    else:
+        st.warning("Matrix not loaded")
+
 # -----------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------
@@ -853,12 +896,26 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
         return "Matrix not loaded", "Matrix file could not be loaded"
     country_keys = set(k[0] for k in matrix_lookup.keys())
     matched_country = fuzzy_country_match(country, country_keys)
+    _country_normalized = str(country).strip().lower()
     if not matched_country:
-        return "No match found", f"Country '{country}' not found in matrix"
-    lookup_key = (matched_country, str(business_segment).strip().lower(), str(customer_segment).strip().lower())
+        return "No match found", f"Country '{country}' not found in matrix (normalised lookup key: '{_country_normalized}')"
+    # Normalise business_segment and customer_segment: strip + lowercase for case-insensitive matching
+    bs_norm = str(business_segment).strip().lower()
+    cs_norm = str(customer_segment).strip().lower()
+    lookup_key = (matched_country, bs_norm, cs_norm)
     if lookup_key in matrix_lookup:
         return matrix_lookup[lookup_key], f"Matched: {matched_country.title()} | {business_segment} | {customer_segment}"
-    return "No match found", f"No matrix entry for {matched_country.title()} + {business_segment} + {customer_segment}"
+    # Diagnostic: collect what business/customer segment keys exist for this country
+    _available_bs = sorted({k[1] for k in matrix_lookup if k[0] == matched_country})
+    _available_cs = sorted({k[2] for k in matrix_lookup if k[0] == matched_country})
+    return (
+        "No match found",
+        (
+            f"No matrix entry for {matched_country.title()} + '{business_segment}' + '{customer_segment}'. "
+            f"Available business segments for this country: {_available_bs[:5]}. "
+            f"Available customer segments: {_available_cs}."
+        )
+    )
 
 # -----------------------------------------------
 # SECONDARY ACCOUNT OWNER
@@ -952,14 +1009,29 @@ def enrich_with_llm(snippets, account_name):
 
     system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions.
 
-Search the web for the most current publicly available information about this company.
+Conduct COMPREHENSIVE DEEP RESEARCH on the named company using multiple authoritative sources. Do NOT rely on just the first result you find — cross-reference multiple sources and assess their credibility before settling on a value.
+
+SOURCE PRIORITY ORDER (highest to lowest authority):
+1. The company's own website — annual reports, investor relations pages, official press releases
+2. Official regulatory filings — SEC EDGAR, Companies House, central bank registers, stock exchange filings
+3. Major financial data providers — Bloomberg, Reuters, S&P Global, Moody's, Fitch, FactSet
+4. Wikipedia and established business databases — Crunchbase, LinkedIn, Dun & Bradstreet, Bureau van Dijk
+5. News articles from reputable outlets — Financial Times, Wall Street Journal, The Economist
+
+For REVENUE and EMPLOYEE figures: explicitly search the company's most recent annual report or investor relations page first. If sources conflict, use the most authoritative and recent one, and note the discrepancy in the value (e.g. "€4.5bn (FY2024, per annual report); Reuters cites €4.2bn").
+
+For ULTIMATE PARENT: You MUST research and find the ultimate parent company. Most major banks and financial institutions trade under a commercial brand name but are owned by a listed holding company at the top of the corporate structure. Search explicitly for the corporate ownership chain. Examples:
+- Bank of Ireland → Bank of Ireland Group plc
+- AIB → AIB Group plc
+- Barclays → Barclays PLC
+- JPMorgan Chase Bank → JPMorgan Chase & Co.
+- Goldman Sachs Bank → The Goldman Sachs Group, Inc.
+Always return the top-level listed or registered entity (the ultimate group holding company), not an operating subsidiary. Return null ONLY if the company is genuinely independently owned with no parent entity.
 
 IMPORTANT:
-- For employee count and revenue, find the most recent figures available online, not from training data.
-- Include the year/date of the data where possible.
+- Include the year/date of each data point where possible (e.g. "€4.5bn (FY2024)").
 - For each data point (revenue, employees, AUM), include the source URL where you found the information.
-
-For ultimate_parent: research the full corporate group ownership structure. Many banks and financial institutions trade under a commercial name but are owned by a listed holding company (e.g. "Bank of Ireland" is owned by "Bank of Ireland Group plc"). Always return the top-level listed or registered entity, not the operating subsidiary.
+- If different sources give different values, prefer the most authoritative/recent source and note the discrepancy.
 
 Extract structured firmographic data about the named company and return it as a single JSON object with exactly these keys:
 {_fields}
@@ -969,9 +1041,13 @@ Use null for fields you cannot determine. For segment fields, pick the single be
     if use_knowledge_fallback:
         user_message = (
             f"Company: {account_name}\n\n"
-            "Search the web for the most current publicly available information about this company. "
+            "Conduct comprehensive deep research on this company using multiple authoritative sources. "
+            "Search the company's own website (annual reports, investor relations pages) first, "
+            "then regulatory filings, then major financial data providers. "
             "Find the latest figures for revenue, employees, AUM, ultimate parent company, and all other fields. "
-            "For employee count and revenue, find the most recent figures available online. "
+            "For employee count and revenue, prefer the most recent annual report or investor relations data. "
+            "For ultimate parent, research the full corporate ownership chain to find the top-level holding company. "
+            "Cross-reference multiple sources and note any discrepancies. "
             "Include the year/date of the data where possible."
         )
     else:
@@ -981,9 +1057,14 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         )
         user_message = (
             f"Company: {account_name}\n\n"
-            f"Preliminary web search results (these may be limited):\n{snippets_text}\n\n"
-            "Please also search the web directly for any missing or outdated information, "
-            "especially the most current employee count and revenue figures."
+            f"Preliminary web search results (these may be limited or incomplete):\n{snippets_text}\n\n"
+            "Now conduct your own comprehensive deep research to verify and supplement the above data. "
+            "Search the company's own website (annual reports, investor relations) as the primary source, "
+            "then cross-reference with regulatory filings and major financial data providers. "
+            "Pay special attention to: (1) the most current employee count and revenue from official sources, "
+            "(2) the full corporate ownership chain to identify the ultimate parent holding company — "
+            "for example, Bank of Ireland → Bank of Ireland Group plc. "
+            "Note any discrepancies between sources."
         )
 
     try:
@@ -998,9 +1079,11 @@ Use null for fields you cannot determine. For segment fields, pick the single be
 
         combined_input = (
             f"{system_prompt}\n\n{user_message}\n\n"
-            "IMPORTANT: Use the web_search tool to find the most current, accurate data "
-            "available on the internet for this company. Do not rely on training data. "
-            "Return your response as a JSON object."
+            "IMPORTANT: Use the web_search tool to conduct comprehensive deep research. "
+            "Search multiple authoritative sources — prioritise the company's own website, "
+            "annual reports, regulatory filings, then major financial data providers. "
+            "Do NOT stop at the first result. Cross-reference sources and use the most "
+            "authoritative/recent data. Return your response as a JSON object."
         )
 
         try:
@@ -1251,7 +1334,10 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
 # -----------------------------------------------
 # TABS
 # -----------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(["Customer Attributes", "Lead Matching", "Account Matching", "ICP Analysis"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Customer Attributes", "Lead Matching", "Account Matching", "ICP Analysis",
+    "Customer Segment Logic", "Fenergo Segmentation"
+])
 
 # ===============================================
 # TAB 1 — CUSTOMER ATTRIBUTES
@@ -2007,3 +2093,208 @@ with tab4:
         providing fit ratings and prioritisation recommendations for the sales team.</p>
     </div>
     """, unsafe_allow_html=True)
+
+# ===============================================
+# TAB 5 — CUSTOMER SEGMENT LOGIC
+# ===============================================
+with tab5:
+    st.markdown('<p class="fen-section-title">Customer Segment Logic</p>', unsafe_allow_html=True)
+    st.markdown("""
+This tab explains how the **Customer Segment** (Enterprise / Mid-Market / Scale-up) is derived for each account.
+The classification is based on the account's **Market Segment** combined with key financial metrics.
+""")
+
+    # Key rules callout
+    st.info("""
+**Key Rules:**
+- 🏆 **"Highest tier wins"** — if *any single metric* reaches the Enterprise threshold, the result is **Enterprise**, regardless of other metrics.
+- ❓ **All metrics unknown** — if AUM, Revenue, and Employees are all unavailable, the account defaults to **Scale-up**.
+- 🏦 **Full-Service Banks** — classification is special: the account must have **G-SIB or D-SIB designation** to be classified as Enterprise. Without it, the Banks thresholds apply instead.
+- 📊 **Metrics evaluated independently** — each metric (AUM, Revenue, Employees) is assessed on its own; any single Enterprise-level metric triggers Enterprise.
+""")
+
+    # Segmentation threshold data for the table
+    _seg_data = [
+        {
+            "Market Segment": "Banks",
+            "Metric": "AUM (Assets)",
+            "Scale-up": "< €10bn",
+            "Mid-Market": "€10bn – €200bn",
+            "Enterprise": "> €200bn",
+        },
+        {
+            "Market Segment": "Banks",
+            "Metric": "Annual Revenue",
+            "Scale-up": "< €2bn",
+            "Mid-Market": "€2bn – €10bn",
+            "Enterprise": "> €10bn",
+        },
+        {
+            "Market Segment": "Banks",
+            "Metric": "Employees (FTE)",
+            "Scale-up": "< 1,000",
+            "Mid-Market": "1,000 – 5,000",
+            "Enterprise": "> 5,000",
+        },
+        {
+            "Market Segment": "Asset Mgmt., Servicing & Insurance",
+            "Metric": "AUM (Assets)",
+            "Scale-up": "< €10bn",
+            "Mid-Market": "€10bn – €100bn",
+            "Enterprise": "> €100bn",
+        },
+        {
+            "Market Segment": "Asset Mgmt., Servicing & Insurance",
+            "Metric": "Annual Revenue",
+            "Scale-up": "< €2bn",
+            "Mid-Market": "€2bn – €10bn",
+            "Enterprise": "> €10bn",
+        },
+        {
+            "Market Segment": "Asset Mgmt., Servicing & Insurance",
+            "Metric": "Employees (FTE)",
+            "Scale-up": "< 150",
+            "Mid-Market": "150 – 1,000",
+            "Enterprise": "> 1,000",
+        },
+        {
+            "Market Segment": "Corporates",
+            "Metric": "Annual Revenue",
+            "Scale-up": "< €2bn",
+            "Mid-Market": "€2bn – €10bn",
+            "Enterprise": "> €10bn",
+        },
+        {
+            "Market Segment": "Corporates",
+            "Metric": "Employees (FTE)",
+            "Scale-up": "< 1,000",
+            "Mid-Market": "1,000 – 5,000",
+            "Enterprise": "> 5,000",
+        },
+        {
+            "Market Segment": "Fintech",
+            "Metric": "Annual Revenue",
+            "Scale-up": "< €500m",
+            "Mid-Market": "€500m – €10bn",
+            "Enterprise": "> €10bn",
+        },
+        {
+            "Market Segment": "Fintech",
+            "Metric": "Employees (FTE)",
+            "Scale-up": "< 250",
+            "Mid-Market": "250 – 1,000",
+            "Enterprise": "> 1,000",
+        },
+        {
+            "Market Segment": "Other / Default",
+            "Metric": "Annual Revenue",
+            "Scale-up": "< €2bn",
+            "Mid-Market": "€2bn – €10bn",
+            "Enterprise": "> €10bn",
+        },
+        {
+            "Market Segment": "Other / Default",
+            "Metric": "Employees (FTE)",
+            "Scale-up": "< 1,000",
+            "Mid-Market": "1,000 – 5,000",
+            "Enterprise": "> 5,000",
+        },
+    ]
+
+    _seg_df = pd.DataFrame(_seg_data)
+
+    def _colour_tier(val):
+        if val and ">" in str(val):
+            return "background-color: #d4edda; color: #155724; font-weight: 600;"
+        if val and "–" in str(val):
+            return "background-color: #fff3cd; color: #856404; font-weight: 600;"
+        if val and "<" in str(val):
+            return "background-color: #f8d7da; color: #721c24; font-weight: 600;"
+        return ""
+
+    _styled_seg = (
+        _seg_df.style
+        .map(_colour_tier, subset=["Scale-up", "Mid-Market", "Enterprise"])
+        .set_properties(**{"text-align": "left"})
+    )
+    st.dataframe(_styled_seg, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("### 🏦 Full-Service Banks — Special Classification Logic")
+    st.markdown("""
+Full-Service Banks follow a distinct classification path:
+
+| Designation | How classified | Notes |
+|---|---|---|
+| **G-SIB** (Global Systemically Important Bank) | Automatically **Enterprise** | The G-SIB list is maintained in the code (`GSIB_LIST`). If the account name matches any G-SIB, it is immediately classified as Enterprise. |
+| **D-SIB** (Domestic Systemically Important Bank) | **Enterprise** after verification | D-SIBs are matched against a static list by country (`DSIB_LIST`). A warning is shown to verify with the local regulator before finalising. |
+| **Neither G-SIB nor D-SIB** | Falls back to **Banks** thresholds | AUM / Revenue / Employees thresholds for "Banks" are applied as normal. |
+
+> ⚠️ The D-SIB list is maintained in the application code and should be kept up to date. D-SIB designations can change — always verify with the relevant local regulator.
+""")
+
+    st.markdown("---")
+    st.markdown("### 📝 Notes")
+    st.markdown("""
+- **AUM** (Assets Under Management) is primarily relevant for Banks and Asset Management firms. For Corporates and Fintechs, it is typically N/A.
+- **Revenue** figures should be in EUR billions (€bn). The LLM converts values from other currencies automatically.
+- **Employees** refers to full-time equivalent (FTE) headcount.
+- When both Revenue and Employees are known, **either one** can independently trigger Enterprise or Mid-Market — the highest tier wins.
+- The "Other / Default" thresholds apply to any Market Segment not explicitly listed above (e.g. Other, Precious Metals, Legal Services, etc.).
+""")
+
+# ===============================================
+# TAB 6 — FENERGO SEGMENTATION
+# ===============================================
+with tab6:
+    st.markdown('<p class="fen-section-title">Fenergo Segmentation Hierarchy</p>', unsafe_allow_html=True)
+    st.markdown("""
+This tab shows the full **three-level segmentation hierarchy** used by Fenergo.
+Every account is classified across three levels:
+
+> **Market Segment** → **Business Segment** → **Detailed Business Segment**
+
+The Detailed Business Segment drives the **Customer Segment**, **Account Category**, and **Secondary Account Owner** assignments.
+""")
+
+    # Build a grouped structure from SEGMENT_HIERARCHY
+    _hier_dict = {}
+    for (detailed, business, market) in SEGMENT_HIERARCHY:
+        _hier_dict.setdefault(market, {}).setdefault(business, []).append(detailed)
+
+    # Display each Market Segment as an expandable section
+    for _market_seg, _business_segs in _hier_dict.items():
+        with st.expander(f"🏛️ **{_market_seg}**", expanded=False):
+            for _biz_seg, _detailed_segs in _business_segs.items():
+                st.markdown(f"**📂 {_biz_seg}**")
+                _ds_items = "  \n".join(f"&nbsp;&nbsp;&nbsp;&nbsp;• {ds}" for ds in _detailed_segs)
+                st.markdown(_ds_items, unsafe_allow_html=True)
+            # Special note for Full-Service Banks
+            if _market_seg == "Full-Service Banks":
+                st.info("""
+**Full-Service Banks — classification logic:**
+
+Accounts in this segment require a **G-SIB or D-SIB designation** to be classified as Enterprise.
+
+- **G-SIBs** (Global Systemically Important Banks) are automatically classified as Enterprise based on the GSIB_LIST maintained in the code. This list includes major global banks (JPMorgan Chase, HSBC, Deutsche Bank, BNP Paribas, etc.).
+- **D-SIBs** (Domestic Systemically Important Banks) are matched against a country-specific DSIB_LIST. A verification warning is shown — always confirm with the local regulator, as designations can change.
+- Banks that are **neither G-SIB nor D-SIB** fall back to the standard **Banks** segment thresholds (AUM / Revenue / Employees).
+""")
+
+    st.markdown("---")
+
+    # Full hierarchy table view
+    st.markdown("### 📋 Complete Hierarchy Table")
+    _hier_df = pd.DataFrame(SEGMENT_HIERARCHY, columns=["Detailed Business Segment", "Business Segment", "Market Segment"])
+    _hier_df = _hier_df[["Market Segment", "Business Segment", "Detailed Business Segment"]]
+    st.dataframe(_hier_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("### 📝 Notes")
+    st.markdown("""
+- The **Detailed Business Segment** is the most granular classification — it is what the LLM assigns based on the company's industry and activities.
+- The **Business Segment** is the mid-level grouping (e.g. "Asset & Wealth Mgmt." groups together Asset Management, Hedge Funds, Pension Funds, etc.).
+- The **Market Segment** is the top-level grouping that drives the Customer Segment thresholds (see the **Customer Segment Logic** tab).
+- These three levels are used together to determine the **Account Category** (via the account category matrix) and the **Secondary Account Owner**.
+- The G-SIB and D-SIB lists (`GSIB_LIST` and `DSIB_LIST`) are maintained in the application code and should be reviewed periodically to ensure accuracy.
+""")
