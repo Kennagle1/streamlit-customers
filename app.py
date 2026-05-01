@@ -1008,7 +1008,6 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 model="gpt-4.1",
                 tools=[{"type": "web_search_preview"}],
                 input=combined_input,
-                text={"format": {"type": "json_object"}},
             )
 
             # Use SDK's built-in property to extract text from the response
