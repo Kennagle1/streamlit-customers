@@ -1004,7 +1004,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         try:
             resp_data = client.responses.create(
                 model="gpt-4.1",
-                tools=[{"type": "web_search_preview"}],
+                tools=[{"type": "web_search"}],
                 input=combined_input,
             )
 
