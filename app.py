@@ -8,7 +8,8 @@ import re
 import difflib
 import json
 import requests
-from openai import AzureOpenAI
+from openai import OpenAI
+import traceback
 
 # -----------------------------------------------
 # PAGE CONFIG
@@ -16,16 +17,18 @@ from openai import AzureOpenAI
 st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", page_icon="🏦")
 
 # -----------------------------------------------
-# AZURE OPENAI CLIENT
+# OPENAI CLIENT
 # -----------------------------------------------
+_openai_init_error = None
+_openai_api_key_display = None
 try:
-    client = AzureOpenAI(
-        api_key=st.secrets["azure_openai"]["api_key"],
-        azure_endpoint=st.secrets["azure_openai"]["endpoint"],
-        api_version=st.secrets["azure_openai"]["api_version"],
-    )
-except Exception:
+    _openai_api_key = st.secrets["openai"]["api_key"]
+    client = OpenAI(api_key=_openai_api_key)
+    # Build masked key display (first 7 chars + ****)
+    _openai_api_key_display = _openai_api_key[:7] + "****" if len(_openai_api_key) > 7 else "****"
+except Exception as _e:
     client = None
+    _openai_init_error = str(_e)
 
 # -----------------------------------------------
 # FENERGO BRAND STYLING
@@ -468,6 +471,20 @@ else:
     st.sidebar.success(f"✅ Matrix loaded ({len(set(k[0] for k in matrix_lookup.keys()))} countries)")
 
 # -----------------------------------------------
+# AI DEBUG INFO (sidebar)
+# -----------------------------------------------
+with st.sidebar.expander("🔧 AI Debug Info"):
+    st.markdown("**Model:** `gpt-4.1`")
+    if client is not None:
+        st.success("✅ OpenAI client initialised")
+        if _openai_api_key_display:
+            st.markdown(f"**API key:** `{_openai_api_key_display}`")
+    else:
+        st.error("❌ OpenAI client NOT initialised")
+        if _openai_init_error:
+            st.code(_openai_init_error)
+
+# -----------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------
 def generate_name_variations(name):
@@ -903,7 +920,7 @@ def web_research(account_name):
 # LLM FIRMOGRAPHIC EXTRACTION
 # -----------------------------------------------
 def enrich_with_llm(snippets, account_name):
-    """Extract structured firmographic data using the Azure OpenAI Responses API
+    """Extract structured firmographic data using the OpenAI Responses API
     with the built-in web_search tool for live internet data.
 
     Primary path: Responses API with web_search tool — searches the live web for
@@ -969,7 +986,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
 
     try:
         if client is None:
-            return {"_llm_error": "Azure OpenAI client not configured"}
+            return {"_llm_error": "OpenAI client not configured"}
 
         extracted = None
 
@@ -977,72 +994,41 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         _responses_api_error = None
         _search_method = None
 
-        az_cfg = st.secrets["azure_openai"]
-        _endpoint_base = str(az_cfg['endpoint']).rstrip('/')
-        _deployment = str(az_cfg["deployment_name"])
-        _api_ver = str(az_cfg.get("api_version", "2025-03-01-preview"))
-
-        # Endpoint candidates — try in order until one succeeds
-        responses_urls = list(dict.fromkeys([
-            # Format 1: Unified v1 spec (newest, no api-version needed)
-            f"{_endpoint_base}/openai/v1/responses",
-            # Format 2: Deployment-specific with api-version
-            f"{_endpoint_base}/openai/deployments/{_deployment}/responses?api-version={_api_ver}",
-            # Format 3: Global responses path with api-version
-            f"{_endpoint_base}/openai/responses?api-version={_api_ver}",
-            # Format 4: Try with known working preview version
-            f"{_endpoint_base}/openai/responses?api-version=2025-03-01-preview",
-        ]))
-
-        resp_headers = {
-            "Content-Type": "application/json",
-            "api-key": str(az_cfg["api_key"]),
-        }
         combined_input = (
             f"{system_prompt}\n\n{user_message}\n\n"
             "IMPORTANT: Use the web_search tool to find the most current, accurate data "
             "available on the internet for this company. Do not rely on training data. "
             "Return your response as a JSON object."
         )
-        resp_body = {
-            "model": _deployment,
-            "tools": [{"type": "web_search"}],
-            "input": combined_input,
-        }
 
-        # Try each endpoint URL until one succeeds
-        for _url in responses_urls:
-            try:
-                resp = requests.post(_url, headers=resp_headers, json=resp_body, timeout=180)
-                resp.raise_for_status()
-                resp_data = resp.json()
+        try:
+            resp_data = client.responses.create(
+                model="gpt-4.1",
+                tools=[{"type": "web_search"}],
+                input=combined_input,
+            )
 
-                # Extract text from the output array
-                text_content = ""
-                for item in resp_data.get("output", []):
-                    if item.get("type") == "message":
-                        for content_item in item.get("content", []):
-                            if content_item.get("type") == "output_text":
-                                text_content = content_item.get("text", "")
-                                break
-                        if text_content:
+            # Extract text from the output array
+            text_content = ""
+            for item in resp_data.output:
+                if item.type == "message":
+                    for content_item in item.content:
+                        if content_item.type == "output_text":
+                            text_content = content_item.text
                             break
+                    if text_content:
+                        break
 
-                # Strip markdown code fences if present (e.g. ```json ... ```)
-                if text_content.startswith("```"):
-                    lines = text_content.split("\n")
-                    if len(lines) >= 3:
-                        text_content = "\n".join(lines[1:-1])
+            # Strip markdown code fences if present (e.g. ```json ... ```)
+            if text_content.startswith("```"):
+                lines = text_content.split("\n")
+                if len(lines) >= 3:
+                    text_content = "\n".join(lines[1:-1])
 
-                extracted = json.loads(text_content)
-                _search_method = "responses_api_web_search"
-                break
-            except requests.exceptions.HTTPError as e:
-                _responses_api_error = f"{e} (tried: {_url})"
-                continue
-            except Exception as e:
-                _responses_api_error = f"{e} (tried: {_url})"
-                continue
+            extracted = json.loads(text_content)
+            _search_method = "responses_api_web_search"
+        except Exception as e:
+            _responses_api_error = str(e)
 
         # --- Fallback path: Chat Completions API ---
         if extracted is None:
@@ -1057,26 +1043,9 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 "appending '(training data, may be outdated)' to revenue and employee values, "
                 "e.g. '€4.5bn (FY2023, training data, may be outdated)'."
             )
-            # If Bing Search resource is configured, use grounded search for live web data.
-            # Add [bing] section to Streamlit secrets to activate this path automatically.
-            bing_config = st.secrets.get("bing", {})
-            extra_body = None
-            _bing_key = bing_config.get("api_key") if isinstance(bing_config, dict) else None
-            if _bing_key and isinstance(_bing_key, str) and _bing_key.strip():
-                extra_body = {
-                    "data_sources": [{
-                        "type": "bing_search",
-                        "parameters": {
-                            "api_key": _bing_key.strip(),
-                            "endpoint": str(bing_config.get("endpoint", "https://api.bing.microsoft.com/")).strip()
-                        }
-                    }]
-                }
 
-            # GPT-4o is recommended over GPT-4o-mini for best accuracy on structured extraction.
-            # Update the deployment_name secret to switch models without any code change.
-            create_kwargs = dict(
-                model=st.secrets["azure_openai"]["deployment_name"],
+            response = client.chat.completions.create(
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": fallback_system_prompt},
                     {"role": "user", "content": user_message},
@@ -1084,10 +1053,6 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                 response_format={"type": "json_object"},
                 temperature=0,
             )
-            if extra_body:
-                create_kwargs["extra_body"] = extra_body
-
-            response = client.chat.completions.create(**create_kwargs)
             extracted = json.loads(response.choices[0].message.content)
             _search_method = "chat_completions_fallback"
 
@@ -1107,10 +1072,9 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         result["_search_method"] = _search_method
         if _responses_api_error:
             result["_responses_api_error"] = _responses_api_error
-            result["_tried_urls"] = responses_urls
         return result
     except Exception as e:
-        return {"_llm_error": str(e)}
+        return {"_llm_error": str(e), "_llm_traceback": traceback.format_exc()}
 
 # -----------------------------------------------
 # FULL SEGMENTATION
@@ -1458,10 +1422,13 @@ with tab1:
                     if 'error' not in _research:
                         _step2b_label = "Step 2: Researching company with AI (live web search)..."
                         with st.status(_step2b_label, expanded=True) as _llm_status:
-                            st.write("Querying Azure OpenAI with live web search for current firmographic data...")
+                            st.write("Querying OpenAI (gpt-4.1) with live web search for current firmographic data...")
                             _llm_data = enrich_with_llm(_research['snippets'], _account_name)
                             if '_llm_error' in _llm_data:
                                 st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
+                                if '_llm_traceback' in _llm_data:
+                                    with st.expander("🔍 Error details"):
+                                        st.code(_llm_data['_llm_traceback'])
                                 _llm_status.update(
                                     label="Step 2b: AI extraction skipped (using raw data)",
                                     state="error",
@@ -1485,17 +1452,13 @@ with tab1:
                                 _search_method_val = _llm_data.get('_search_method')
                                 _resp_err = _llm_data.get('_responses_api_error')
                                 if _search_method_val == "responses_api_web_search":
-                                    st.write("✅ Used Responses API with live web search")
+                                    st.write("✅ Used Responses API (gpt-4.1) with live web search")
                                 elif _search_method_val == "chat_completions_fallback":
                                     st.warning(
-                                        f"⚠️ Responses API failed, fell back to Chat Completions (training data only)"
+                                        "⚠️ Responses API failed, fell back to Chat Completions (training data only)"
                                     )
                                 if _resp_err:
-                                    _tried = _llm_data.get('_tried_urls', [])
-                                    st.caption(
-                                        f"ℹ️ Tried {len(_tried)} endpoint format(s), all failed. "
-                                        f"Last error: {_resp_err}"
-                                    )
+                                    st.caption(f"ℹ️ Responses API error: {_resp_err}")
                                 _llm_status.update(
                                     label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
                                     state="complete",
@@ -1677,19 +1640,13 @@ with tab1:
                 _search_method_display = _research.get('_search_method')
                 _resp_api_err_display = _research.get('_responses_api_error')
                 if _search_method_display == "responses_api_web_search":
-                    st.success("🌐 Data sourced from live web search")
+                    st.success("🌐 Data sourced from live web search (OpenAI gpt-4.1)")
                 elif _search_method_display == "chat_completions_fallback":
-                    _tried_urls_display = _research.get('_tried_urls', [])
                     _err_detail = f" Last error: {_resp_api_err_display}." if _resp_api_err_display else ""
                     st.warning(
                         f"⚠️ Data sourced from AI training data (may be outdated).{_err_detail} "
-                        "Check your Azure OpenAI deployment supports the Responses API."
+                        "Responses API with web_search was unavailable; fell back to Chat Completions."
                     )
-                    if _tried_urls_display:
-                        st.caption(
-                            f"ℹ️ Tried {len(_tried_urls_display)} endpoint formats, all failed:\n"
-                            + "\n".join(f"  - {u}" for u in _tried_urls_display)
-                        )
 
                 with st.expander("View raw web search results (for manual review)"):
                     for _i, _item in enumerate(_research.get('snippets', []), 1):
