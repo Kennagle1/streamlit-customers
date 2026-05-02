@@ -465,14 +465,14 @@ sf_accounts = None
 if uploaded_file:
     sf_accounts = pd.read_csv(uploaded_file)
     st.sidebar.success(f"✅ Loaded {len(sf_accounts)} accounts")
-    with st.sidebar.expander("Preview"):
-        st.dataframe(sf_accounts.head())
 
 # -----------------------------------------------
 # LOAD ACCOUNT CATEGORY MATRIX
 # -----------------------------------------------
 @st.cache_data
 def load_account_category_matrix():
+    """Load account category matrix. Tries multi-header first, falls back to single-header."""
+    _primary_err = None
     try:
         df = pd.read_excel("account_category_matrix.xlsx", header=[0, 1], index_col=0)
         df.columns = pd.MultiIndex.from_arrays([
@@ -492,11 +492,40 @@ def load_account_category_matrix():
                         str(business_seg).strip().lower(),
                         str(customer_seg).strip().lower()
                     )] = str(value).strip()
-        return lookup, None
+        if lookup:
+            return lookup, None
+        _primary_err = "Multi-header read succeeded but matrix contains no valid entries"
     except FileNotFoundError:
         return {}, "account_category_matrix.xlsx not found in repo root"
     except Exception as e:
-        return {}, f"Error loading matrix: {str(e)}"
+        _primary_err = str(e)
+
+    # Fallback: single-header row with "BusinessSegment / CustomerSegment" column names
+    try:
+        df2 = pd.read_excel("account_category_matrix.xlsx", header=0, index_col=0)
+        lookup2 = {}
+        for country in df2.index:
+            if pd.isna(country):
+                continue
+            country_clean = str(country).strip().lower()
+            for col in df2.columns:
+                col_str = str(col).strip()
+                for sep in [' / ', ' | ', '/', ' - ']:
+                    if sep in col_str:
+                        parts = col_str.split(sep, 1)
+                        bseg = parts[0].strip()
+                        cseg = parts[1].strip()
+                        val = df2.loc[country, col]
+                        if pd.notna(val):
+                            lookup2[(country_clean, bseg.lower(), cseg.lower())] = str(val).strip()
+                        break
+        if lookup2:
+            return lookup2, None
+        return {}, f"Matrix loaded but no entries found. Primary error: {_primary_err}. Fallback attempted with {len(df2.columns)} columns."
+    except FileNotFoundError:
+        return {}, "account_category_matrix.xlsx not found in repo root"
+    except Exception as e2:
+        return {}, f"Error loading matrix: primary={_primary_err}; fallback={e2}"
 
 matrix_lookup, matrix_error = load_account_category_matrix()
 if matrix_error:
@@ -649,6 +678,22 @@ def compute_match_score(new_norm, val_norm):
     if length_ratio < 0.6:
         blended *= (0.5 + 0.5 * length_ratio)
 
+    # Word-level substring boost: if all words of the shorter name appear as whole words in
+    # the longer name, boost to at least 75.  This handles abbreviations like "UBS" → "UBS IB"
+    # or "UBS LUX" without relying solely on fuzzy ratios that penalize length differences.
+    _new_words = set(new_norm.split()) if new_norm else set()
+    _val_words = set(val_norm.split()) if val_norm else set()
+    _shorter_words = _new_words if len(new_norm) <= len(val_norm) else _val_words
+    _longer_words  = _val_words if len(new_norm) <= len(val_norm) else _new_words
+    _shorter_norm  = new_norm if len(new_norm) <= len(val_norm) else val_norm
+    if (
+        len(_shorter_norm) >= 3
+        and _shorter_words
+        and _shorter_words.issubset(_longer_words)
+        and not _shorter_words.issubset(FINANCIAL_STOP_WORDS)
+    ):
+        blended = max(blended, 75.0)
+
     # Cap at 99 — only exact normalised match earns 100
     return round(min(blended, 99.0), 1)
 
@@ -735,6 +780,80 @@ def resolve_segment(detailed_segment_guess):
         if guess in key or key in guess:
             return value
     return None
+
+def lookup_sf_ultimate_parent(sf_accounts, ultimate_parent):
+    """Search the SF upload for a row whose 'Ultimate Parent' column matches
+    *ultimate_parent* (exact normalised match or fuzzy ≥ 80).
+
+    Returns:
+        (parent_account: str|None, reporting_group: str|None)
+    """
+    if sf_accounts is None or not ultimate_parent:
+        return None, None
+    ult_str = str(ultimate_parent).strip()
+    if ult_str.lower() in ('', 'not found', 'n/a', 'null', 'none'):
+        return None, None
+
+    cols = sf_accounts.columns.tolist()
+    cols_lc = {c: c.lower().strip() for c in cols}
+
+    # Detect Ultimate Parent column (exact first, then partial)
+    ult_parent_col = None
+    for c in cols:
+        if cols_lc[c] in ('ultimate parent', 'ultimate_parent'):
+            ult_parent_col = c
+            break
+    if ult_parent_col is None:
+        for c in cols:
+            lc = cols_lc[c]
+            if 'ultimate' in lc and 'parent' in lc:
+                ult_parent_col = c
+                break
+
+    # Detect Parent Account column (exact first, then partial, exclude IDs)
+    parent_account_col = None
+    for c in cols:
+        if cols_lc[c] in ('parent account', 'parent_account'):
+            parent_account_col = c
+            break
+    if parent_account_col is None:
+        for c in cols:
+            lc = cols_lc[c]
+            if 'parent' in lc and 'account' in lc and 'id' not in lc and 'ultimate' not in lc:
+                parent_account_col = c
+                break
+
+    # Detect Reporting Group column
+    reporting_group_col = None
+    for c in cols:
+        lc = cols_lc[c]
+        if 'reporting group' in lc or lc == 'reportinggroup' or lc == 'reporting_group':
+            reporting_group_col = c
+            break
+
+    if not ult_parent_col:
+        return None, None
+
+    ult_norm = normalize_name(ult_str)
+    for _, row in sf_accounts.iterrows():
+        sf_ult_raw = row.get(ult_parent_col, '')
+        if pd.isna(sf_ult_raw) or str(sf_ult_raw).strip() == '':
+            continue
+        sf_ult_norm = normalize_name(str(sf_ult_raw).strip())
+        if sf_ult_norm == ult_norm or compute_match_score(ult_norm, sf_ult_norm) >= 80:
+            parent_acct = ''
+            rgroup = ''
+            if parent_account_col:
+                raw = row.get(parent_account_col, '')
+                if pd.notna(raw):
+                    parent_acct = str(raw).strip()
+            if reporting_group_col:
+                raw = row.get(reporting_group_col, '')
+                if pd.notna(raw):
+                    rgroup = str(raw).strip()
+            return parent_acct or None, rgroup or None
+
+    return None, None
 
 # -----------------------------------------------
 # G-SIB / D-SIB CHECKS
@@ -948,9 +1067,9 @@ def get_secondary_account_owner(region, account_category):
         else:
             current_month = datetime.now().month
             if current_month % 2 == 1:
-                return f"Joseph Cawley (current month: {datetime.now().strftime('%B')})"
+                return "Joseph Cawley"
             else:
-                return f"Gabriel Simpatico (current month: {datetime.now().strftime('%B')})"
+                return "Gabriel Simpatico"
     if "EMEA" in region_upper:
         return "Elaine Zhang"
     if "APAC" in region_upper:
@@ -1006,25 +1125,26 @@ def enrich_with_llm(snippets, account_name):
     current employee counts, revenue figures, parent company info, etc.
     Fallback: Chat Completions API (used if the Responses API call fails for any reason).
 
-    The `snippets` parameter accepts pre-fetched web snippets (e.g. from DuckDuckGo).
+    The `snippets` parameter accepts pre-fetched web snippets.
     When `snippets` is empty, the LLM is prompted to search the web directly for all
-    fields. When snippets are provided, they are included as context and the LLM is
-    still instructed to supplement them with live web searches.
+    fields.
     """
     use_knowledge_fallback = not snippets
 
     # Shared JSON field definitions
     _fields = f"""- legal_name: full registered legal name (string or null)
 - country_hq: ISO country name of headquarters (string or null)
-- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m"; include the data year if known, e.g. "€4.5bn (FY2024)" (string or null)
-- employees: headcount as integer or human-readable string like "12,500"; include the data year if known, e.g. "12,500 (2024)" (string or null)
-- aum_eur: assets under management as a human-readable string like "€1.2tn"; include the data year if known; use "N/A" if not applicable to this company type, or null if unknown (string or null)
-- ultimate_parent: full legal name of the ultimate parent / group holding company at the very top of the corporate ownership chain (e.g. "Bank of Ireland Group plc" for "Bank of Ireland"). Research the corporate group structure carefully. Return null only if the company is independently owned with no parent. (string or null)
+- annual_revenue_eur: revenue as a human-readable string like "€4.5bn" or "€320m"; include the data year, e.g. "€4.5bn (FY2024)" — MUST be the most recent year available (string or null)
+- employees: headcount as integer or human-readable string like "12,500"; include the data year, e.g. "12,500 (2024)" — MUST be the most recent year available (string or null)
+- aum_eur: assets under management as a human-readable string like "€1.2tn"; include the data year; use "N/A" if not applicable to this company type, or null if unknown (string or null)
+- ultimate_parent: full legal name of the ultimate parent / group holding company at the very top of the corporate ownership chain. See instructions above — MUST always be populated for publicly traded companies. (string or null)
 - ultimate_parent_hq: country of the ultimate parent HQ (string or null)
-- detailed_business_segment: must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}
-- business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)}
-- market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)}
+- detailed_business_segment: the single best-fit Detailed Business Segment — must be exactly one of {json.dumps(VALID_DETAILED_SEGMENTS)}. This is the PRIMARY segment; business_segment and market_segment are derived automatically from it. (string)
+- alternative_detailed_business_segment: if more than one Detailed Business Segment is equally valid for this company, provide ONE alternative here — must be one of {json.dumps(VALID_DETAILED_SEGMENTS)}, or null if only one segment clearly applies (string or null)
+- business_segment: must be one of {json.dumps(VALID_BUSINESS_SEGMENTS)} — will be overridden by hierarchy lookup but provide your best estimate (string)
+- market_segment: must be one of {json.dumps(VALID_MARKET_SEGMENTS)} — will be overridden by hierarchy lookup but provide your best estimate (string)
 - industry_classification_rationale: a 1-2 sentence explanation of why you chose the detailed_business_segment value for this company (string or null)
+- reporting_group_suggestion: a short, commonly-used friendly name for this company or its group — the informal name rather than the full legal name (e.g. "Barclays" for "Barclays Services Limited", "Mastercard" for "Mastercard Incorporated", "HSBC" for "HSBC Holdings plc", "UBS" for "UBS Group AG"). Used as the Reporting Group if not found in the CRM upload. (string or null)
 - sources: a JSON object with keys "revenue_source", "employees_source", "aum_source" — each value should be the URL of the source used for that data point, or null if unavailable (object)"""
 
     system_prompt = f"""You are a financial-services data analyst with broad knowledge of global financial institutions.
@@ -1038,15 +1158,22 @@ SOURCE PRIORITY ORDER (highest to lowest authority):
 4. Wikipedia and established business databases — Crunchbase, LinkedIn, Dun & Bradstreet, Bureau van Dijk
 5. News articles from reputable outlets — Financial Times, Wall Street Journal, The Economist
 
-For REVENUE and EMPLOYEE figures: explicitly search the company's most recent annual report or investor relations page first. If sources conflict, use the most authoritative and recent one, and note the discrepancy in the value (e.g. "€4.5bn (FY2024, per annual report); Reuters cites €4.2bn").
+For REVENUE and EMPLOYEE figures: You MUST use the MOST RECENT data available — current year (2025) or last fiscal year (FY2024/FY2025). Do NOT return 2023 data if 2024 or 2025 data exists. Always check the company's latest annual report or most recent quarterly filing FIRST. If more recent data exists, use it and explicitly state the year (e.g. "€4.5bn (FY2024)" or "€4.5bn (FY2025)"). Never use outdated data when more recent data is available. If sources conflict, use the most authoritative and recent one.
 
-For ULTIMATE PARENT: You MUST research and find the ultimate parent company. Most major banks and financial institutions trade under a commercial brand name but are owned by a listed holding company at the top of the corporate structure. Search explicitly for the corporate ownership chain. Examples:
-- Bank of Ireland → Bank of Ireland Group plc
-- AIB → AIB Group plc
-- Barclays → Barclays PLC
-- JPMorgan Chase Bank → JPMorgan Chase & Co.
-- Goldman Sachs Bank → The Goldman Sachs Group, Inc.
-Always return the top-level listed or registered entity (the ultimate group holding company), not an operating subsidiary. Return null ONLY if the company is genuinely independently owned with no parent entity.
+For ULTIMATE PARENT: You MUST find and return the ultimate parent company for EVERY company — do NOT return null without exhaustive research. This is critically important.
+
+CRITICAL RULE: For well-known publicly traded companies that ARE themselves the ultimate parent entity, you MUST return the company itself (or its holding company name). Examples:
+- Mastercard Incorporated → "Mastercard Incorporated" (self-owned, publicly traded — Mastercard IS the ultimate parent)
+- Visa Inc. → "Visa Inc." (self-owned, publicly traded)
+- PayPal Holdings, Inc. → "PayPal Holdings, Inc." (publicly traded holding company)
+- Apple Inc. → "Apple Inc." (self-owned, publicly traded)
+- Bank of Ireland → "Bank of Ireland Group plc" (the listed holding company)
+- AIB → "AIB Group plc"
+- Barclays → "Barclays PLC"
+- JPMorgan Chase Bank → "JPMorgan Chase & Co."
+- Goldman Sachs Bank → "The Goldman Sachs Group, Inc."
+- UBS → "UBS Group AG"
+Do NOT return null for major publicly traded companies. Always return the top-level listed or registered entity, not an operating subsidiary.
 
 IMPORTANT:
 - Include the year/date of each data point where possible (e.g. "€4.5bn (FY2024)").
@@ -1064,9 +1191,10 @@ Use null for fields you cannot determine. For segment fields, pick the single be
             "Conduct comprehensive deep research on this company using multiple authoritative sources. "
             "Search the company's own website (annual reports, investor relations pages) first, "
             "then regulatory filings, then major financial data providers. "
-            "Find the latest figures for revenue, employees, AUM, ultimate parent company, and all other fields. "
-            "For employee count and revenue, prefer the most recent annual report or investor relations data. "
+            "Find the MOST RECENT figures for revenue, employees, AUM, ultimate parent company, and all other fields. "
+            "For employee count and revenue, ALWAYS use the most recent year available (2024 or 2025 if possible). "
             "For ultimate parent, research the full corporate ownership chain to find the top-level holding company. "
+            "For well-known public companies, return themselves as the ultimate parent if they have no parent above them. "
             "Cross-reference multiple sources and note any discrepancies. "
             "Include the year/date of the data where possible."
         )
@@ -1081,9 +1209,9 @@ Use null for fields you cannot determine. For segment fields, pick the single be
             "Now conduct your own comprehensive deep research to verify and supplement the above data. "
             "Search the company's own website (annual reports, investor relations) as the primary source, "
             "then cross-reference with regulatory filings and major financial data providers. "
-            "Pay special attention to: (1) the most current employee count and revenue from official sources, "
-            "(2) the full corporate ownership chain to identify the ultimate parent holding company — "
-            "for example, Bank of Ireland → Bank of Ireland Group plc. "
+            "Pay special attention to: (1) the MOST RECENT employee count and revenue (prefer 2024/2025 data), "
+            "(2) the full corporate ownership chain to identify the ultimate parent holding company, "
+            "(3) for well-known public companies that are their own ultimate parent, return themselves. "
             "Note any discrepancies between sources."
         )
 
@@ -1177,7 +1305,8 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         for key in ("legal_name", "country_hq", "annual_revenue_eur", "employees",
                     "aum_eur", "ultimate_parent", "ultimate_parent_hq",
                     "detailed_business_segment", "business_segment", "market_segment",
-                    "industry_classification_rationale"):
+                    "industry_classification_rationale",
+                    "alternative_detailed_business_segment", "reporting_group_suggestion"):
             val = extracted.get(key)
             if val is not None and str(val).strip():
                 result[key] = str(val).strip()
@@ -1298,12 +1427,17 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
                 sf_legal_col = c
                 break
 
-    # Detect Country column
+    # Detect Country column — prefer exact "country" match over partial
     sf_country_col = None
     for c in cols:
-        if 'country' in cols_lc[c]:
+        if cols_lc[c] == 'country':
             sf_country_col = c
             break
+    if sf_country_col is None:
+        for c in cols:
+            if 'country' in cols_lc[c]:
+                sf_country_col = c
+                break
 
     new_norm = normalize_name(account_name)
     scored = []
@@ -1500,86 +1634,80 @@ with tab1:
 
             # Enrichment: Steps 2 & 3
             elif st.session_state["tab1_phase"] == "enrichment":
-                # Step 2 — Web research (run once, cache in session state)
+                # Step 2 — AI extraction with live web search (run once, cache in session state)
                 if st.session_state["tab1_research"] is None:
                     _research = {}
                     with st.status(
-                        "Step 2 of 3: Researching company on the web...", expanded=True
+                        "Step 2 of 3: Researching company with AI (live web search)...", expanded=True
                     ) as _status:
-                        st.write(
-                            "Querying: revenue, employees, HQ, legal name, parent company, AUM, industry"
-                        )
-                        st.write(
-                            "Sources: DuckDuckGo → company site, Wikipedia, Bloomberg, Reuters, Crunchbase"
-                        )
-                        _research = web_research(_account_name)
-                        if 'error' in _research:
-                            st.error(f"Search error: {_research['error']}")
-                            _status.update(label="Step 2: Web research failed", state="error")
-                        elif not _research.get('snippets'):
-                            st.info(
-                                "Web search via DuckDuckGo unavailable — AI will search the web directly"
-                            )
+                        st.write("Querying OpenAI (gpt-4.1) with live web search for current firmographic data...")
+                        st.write("Searching: revenue, employees, HQ, legal name, parent company, AUM, industry")
+                        _llm_data = enrich_with_llm([], _account_name)
+                        if '_llm_error' in _llm_data:
+                            st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
+                            if _show_debug and '_llm_traceback' in _llm_data:
+                                with st.expander("🔍 Error details"):
+                                    st.code(_llm_data['_llm_traceback'])
                             _status.update(
-                                label="Step 2: Web search via DuckDuckGo unavailable — AI will search the web directly",
-                                state="complete",
+                                label="Step 2: AI extraction failed",
+                                state="error",
                             )
                         else:
-                            st.write(
-                                f"Retrieved {len(_research['snippets'])} results from "
-                                f"{len(_research['sources'])} sources"
-                            )
-                            for _src in _research['sources'][:4]:
-                                st.write(f"  - {_src}")
-                            _status.update(
-                                label=f"Step 2: Web research complete ({len(_research['sources'])} sources)",
-                                state="complete",
-                            )
-                    # Step 2b — LLM extraction with live web search
-                    if 'error' not in _research:
-                        _step2b_label = "Step 2: Researching company with AI (live web search)..."
-                        with st.status(_step2b_label, expanded=True) as _llm_status:
-                            st.write("Querying OpenAI (gpt-4.1) with live web search for current firmographic data...")
-                            _llm_data = enrich_with_llm(_research['snippets'], _account_name)
-                            if '_llm_error' in _llm_data:
-                                st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
-                                if _show_debug and '_llm_traceback' in _llm_data:
-                                    with st.expander("🔍 Error details"):
-                                        st.code(_llm_data['_llm_traceback'])
-                                _llm_status.update(
-                                    label="Step 2b: AI extraction skipped (using raw data)",
-                                    state="error",
-                                )
-                            else:
-                                _empty = {None, 'Not found', 'N/A', ''}
-                                _fields_found = []
-                                for _key, _val in _llm_data.items():
-                                    # sources is a dict — store as-is without empty-value filtering
-                                    if _key == 'sources':
-                                        if isinstance(_val, dict):
-                                            _research[_key] = _val
-                                            _fields_found.append(_key)
-                                    elif _key.startswith('_'):
-                                        # Internal metadata keys (e.g. _search_method, _responses_api_error)
-                                        _research[_key] = _val
-                                    elif _val not in _empty:
+                            _empty = {None, 'Not found', 'N/A', ''}
+                            _fields_found = []
+                            for _key, _val in _llm_data.items():
+                                # sources is a dict — store as-is without empty-value filtering
+                                if _key == 'sources':
+                                    if isinstance(_val, dict):
                                         _research[_key] = _val
                                         _fields_found.append(_key)
-                                st.write(f"Extracted {len(_fields_found)} firmographic field(s): {', '.join(_fields_found)}")
-                                _search_method_val = _llm_data.get('_search_method')
-                                _resp_err = _llm_data.get('_responses_api_error')
-                                if _search_method_val == "responses_api_web_search":
-                                    st.write("✅ Used Responses API (gpt-4.1) with live web search")
-                                elif _search_method_val == "chat_completions_fallback":
-                                    st.warning(
-                                        "⚠️ Responses API failed, fell back to Chat Completions (training data only)"
-                                    )
-                                if _resp_err:
-                                    st.caption(f"ℹ️ Responses API error: {_resp_err}")
-                                _llm_status.update(
-                                    label=f"Step 2b: AI extraction complete ({len(_fields_found)} fields)",
-                                    state="complete",
+                                elif _key.startswith('_'):
+                                    # Internal metadata keys (e.g. _search_method, _responses_api_error)
+                                    _research[_key] = _val
+                                elif _val not in _empty:
+                                    _research[_key] = _val
+                                    _fields_found.append(_key)
+                            st.write(f"Extracted {len(_fields_found)} firmographic field(s): {', '.join(_fields_found)}")
+                            _search_method_val = _llm_data.get('_search_method')
+                            _resp_err = _llm_data.get('_responses_api_error')
+                            if _search_method_val == "responses_api_web_search":
+                                st.write("✅ Used Responses API (gpt-4.1) with live web search")
+                            elif _search_method_val == "chat_completions_fallback":
+                                st.warning(
+                                    "⚠️ Responses API failed, fell back to Chat Completions (training data only)"
                                 )
+                            if _resp_err:
+                                st.caption(f"ℹ️ Responses API error: {_resp_err}")
+                            _status.update(
+                                label=f"Step 2: AI extraction complete ({len(_fields_found)} fields)",
+                                state="complete",
+                            )
+
+                        # Override business_segment and market_segment from hierarchy
+                        # (AI only determines detailed_business_segment; roll-ups are auto-derived)
+                        _det_seg_llm = _research.get('detailed_business_segment', '')
+                        if _det_seg_llm:
+                            _seg_resolved = resolve_segment(_det_seg_llm)
+                            if _seg_resolved:
+                                _research['business_segment'] = _seg_resolved['business']
+                                _research['market_segment'] = _seg_resolved['market']
+
+                        # Lookup Parent Account and Reporting Group from SF upload
+                        _ult_parent_llm = _research.get('ultimate_parent', '')
+                        if _ult_parent_llm and sf_accounts is not None:
+                            _sf_parent_acct, _sf_rgroup = lookup_sf_ultimate_parent(sf_accounts, _ult_parent_llm)
+                            if _sf_parent_acct:
+                                _research['_parent_account'] = _sf_parent_acct
+                            if _sf_rgroup:
+                                _research['_reporting_group'] = _sf_rgroup
+                                _research['_reporting_group_source'] = 'sf'
+                            elif _research.get('reporting_group_suggestion'):
+                                _research['_reporting_group'] = _research['reporting_group_suggestion']
+                                _research['_reporting_group_source'] = 'ai'
+                        elif _research.get('reporting_group_suggestion'):
+                            _research['_reporting_group'] = _research['reporting_group_suggestion']
+                            _research['_reporting_group_source'] = 'ai'
+
                     st.session_state["tab1_research"] = _research
 
                 # Step 3 — Segmentation (run once, cache in session state)
@@ -1690,11 +1818,17 @@ with tab1:
                     _acct_cat_highlight = None
 
                 # Section 1 — About The Account (6 rows × 2 columns)
+                _parent_account_disp = _research.get('_parent_account', '')
+                _reporting_group_disp = _research.get('_reporting_group', '')
+                _rg_source = _research.get('_reporting_group_source', '')
+                _rg_note = "AI-generated friendly name (no matching entry in Salesforce)" if _rg_source == 'ai' else None
                 _s1_left = [
                     _sf_field("Account Name",            _account_name),
                     _sf_field("Account Type",            _account_type),
-                    _sf_field("Parent Account",          "",  greyed=True),
-                    _sf_field("Reporting Group",         "",  greyed=True),
+                    _sf_field("Parent Account",          _parent_account_disp,
+                              greyed=not bool(_parent_account_disp)),
+                    _sf_field("Reporting Group",         _reporting_group_disp,
+                              greyed=not bool(_reporting_group_disp), note=_rg_note),
                     _sf_field("Account Owner",           "",  greyed=True),
                     _sf_field("Secondary Account Owner", _segmentation.get('secondary_account_owner', '')),
                 ]
@@ -1766,12 +1900,15 @@ with tab1:
                         "Responses API with web_search was unavailable; fell back to Chat Completions."
                     )
 
-                with st.expander("View raw web search results (for manual review)"):
-                    for _i, _item in enumerate(_research.get('snippets', []), 1):
-                        st.markdown(f"**Result {_i}** — _{_item['query']}_")
-                        st.write(f"Source: {_item['source']}")
-                        st.write(_item['snippet'])
-                        st.divider()
+                # Alternative segment warning (Change 6)
+                _alt_seg = _research.get('alternative_detailed_business_segment', '')
+                if _alt_seg:
+                    st.warning(
+                        f"⚠️ **Multiple Detailed Business Segments could apply** for this company: "
+                        f"**{_research.get('detailed_business_segment', '')}** (selected) and "
+                        f"**{_alt_seg}** (alternative). "
+                        "Please review and confirm the most appropriate segment."
+                    )
 
 # ===============================================
 # TAB 2 — LEAD MATCHING (placeholder)
