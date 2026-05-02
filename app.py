@@ -20,6 +20,15 @@ import traceback
 st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", page_icon="🏦")
 
 # -----------------------------------------------
+# APPLICATION CONSTANTS
+# -----------------------------------------------
+APP_VERSION = "2.1"
+MAX_RESPONSES_API_RETRIES = 2          # Retry attempts for Responses API before fallback
+_CAT_REGEX_12 = r'\b(cat|category)\s*[12]\b'   # matches "Cat 1", "Cat 2", "Category 1", etc.
+_CAT_REGEX_3  = r'\b(cat|category)\s*3\b'       # matches "Cat 3", "Category 3"
+_CAT_SECONDARY_OWNER_REGEX = r'\b(cat|category)\s*1\b'  # for secondary owner assignment
+
+# -----------------------------------------------
 # OPENAI CLIENT
 # -----------------------------------------------
 _openai_init_error = None
@@ -662,7 +671,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown("""
+st.markdown(f"""
 <div class="fenergo-header" style="background: linear-gradient(90deg, #002E33 0%, #003d43 60%, #002E33 100%); padding: 18px 32px; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
     <div style="display:flex; align-items:center;">
         <h1 style="color:#21CFB2; font-size:1.6rem; font-weight:700; margin:0; font-family:sans-serif; letter-spacing:0.5px;">
@@ -672,7 +681,7 @@ st.markdown("""
     </div>
     <div style="display:flex; align-items:center; gap:16px;">
         <span style="color:rgba(255,255,255,0.5); font-size:0.78rem;">🟢 System Operational</span>
-        <span style="background:rgba(33,207,178,0.18); color:#21CFB2; padding:3px 10px; border-radius:10px; font-size:0.75rem; font-weight:600;">v2.1</span>
+        <span style="background:rgba(33,207,178,0.18); color:#21CFB2; padding:3px 10px; border-radius:10px; font-size:0.75rem; font-weight:600;">v{APP_VERSION}</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -974,11 +983,11 @@ else:
 
 # Sidebar status / powered-by indicator
 st.sidebar.markdown("---")
-st.sidebar.markdown("""
+st.sidebar.markdown(f"""
 <div class="sidebar-status">
 🤖 Powered by OpenAI gpt-4.1<br>
 🔍 rapidfuzz · pandas · DuckDuckGo<br>
-<span style="color:rgba(255,255,255,0.5); font-size:0.72rem;">Account Intelligence Platform v2.1</span>
+<span style="color:rgba(255,255,255,0.5); font-size:0.72rem;">Account Intelligence Platform v{APP_VERSION}</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1575,7 +1584,7 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
 def get_secondary_account_owner(region, account_category):
     region_upper = (region or '').upper()
     if "AMER" in region_upper or "AMERICAS" in region_upper:
-        if account_category and re.search(r'\b(cat|category)\s*1\b', str(account_category).lower()):
+        if account_category and re.search(_CAT_SECONDARY_OWNER_REGEX, str(account_category).lower()):
             return "Elaine Zhang"
         else:
             current_month = datetime.now().month
@@ -1735,10 +1744,9 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         extracted = None
 
         # --- Primary path: Responses API with web_search tool for live internet data ---
-        # Up to 2 retries before falling back to Chat Completions.
+        # Up to MAX_RESPONSES_API_RETRIES retries before falling back to Chat Completions.
         _responses_api_error = None
         _search_method = None
-        _MAX_RETRIES = 2
 
         combined_input = (
             f"{system_prompt}\n\n{user_message}\n\n"
@@ -1749,7 +1757,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
             "authoritative/recent data. Return your response as a JSON object."
         )
 
-        for _attempt in range(_MAX_RETRIES + 1):
+        for _attempt in range(MAX_RESPONSES_API_RETRIES + 1):
             try:
                 resp_data = client.responses.create(
                     model="gpt-4.1",
@@ -1790,12 +1798,12 @@ Use null for fields you cannot determine. For segment fields, pick the single be
                         _raw_preview = f" | Raw output_text preview: {repr(resp_data.output_text)[:300]}"
                 except Exception:
                     pass
-                _attempt_msg = f"[Attempt {_attempt + 1}/{_MAX_RETRIES + 1}] {type(e).__name__}: {e}{_raw_preview}"
+                _attempt_msg = f"[Attempt {_attempt + 1}/{MAX_RESPONSES_API_RETRIES + 1}] {type(e).__name__}: {e}{_raw_preview}"
                 if _responses_api_error:
                     _responses_api_error += f" || {_attempt_msg}"
                 else:
                     _responses_api_error = _attempt_msg
-                if _attempt < _MAX_RETRIES:
+                if _attempt < MAX_RESPONSES_API_RETRIES:
                     continue  # retry
                 # All retries exhausted — fall through to Chat Completions
 
@@ -2338,9 +2346,9 @@ with tab1:
                 # Use word-boundary regex to avoid false positives like "cat 12" → "cat 1"
                 _acct_cat_val = format_account_category(_segmentation.get('account_category', ''))
                 _acct_cat_lower = str(_acct_cat_val).lower()
-                if re.search(r'\b(cat|category)\s*[12]\b', _acct_cat_lower):
+                if re.search(_CAT_REGEX_12, _acct_cat_lower):
                     _acct_cat_highlight = 'green'
-                elif re.search(r'\b(cat|category)\s*3\b', _acct_cat_lower):
+                elif re.search(_CAT_REGEX_3, _acct_cat_lower):
                     _acct_cat_highlight = 'red'
                 else:
                     _acct_cat_highlight = None
@@ -3554,7 +3562,7 @@ When training data is used, a prominent warning is shown and figures are annotat
 """)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="fen-footer">
   <div>
     <span class="fen-footer-brand">fenergo</span>
@@ -3564,7 +3572,7 @@ st.markdown("""
   </div>
   <div style="display:flex; align-items:center; gap:12px;">
     <span>Powered by OpenAI gpt-4.1 + rapidfuzz</span>
-    <span class="fen-footer-version">v2.1</span>
+    <span class="fen-footer-version">v{APP_VERSION}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
