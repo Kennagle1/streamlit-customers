@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 from duckduckgo_search import DDGS
@@ -7,7 +9,7 @@ import io
 import re
 import difflib
 import json
-import requests
+from html import escape as html_escape
 from openai import OpenAI
 import openai
 import traceback
@@ -21,12 +23,9 @@ st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", p
 # OPENAI CLIENT
 # -----------------------------------------------
 _openai_init_error = None
-_openai_api_key_display = None
 try:
     _openai_api_key = st.secrets["openai"]["api_key"]
     client = OpenAI(api_key=_openai_api_key)
-    # Build masked key display (first 7 chars + ****)
-    _openai_api_key_display = _openai_api_key[:7] + "****" if len(_openai_api_key) > 7 else "****"
 except Exception as _e:
     client = None
     _openai_init_error = str(_e)
@@ -457,7 +456,11 @@ DSIB_FLAT = [name for names in DSIB_LIST.values() for name in names]
 st.sidebar.markdown("### Account Intelligence")
 st.sidebar.markdown("---")
 st.sidebar.markdown("**📂 Salesforce Account List**")
-uploaded_file = st.sidebar.file_uploader("Upload Salesforce Accounts CSV", type=["csv"])
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Salesforce Accounts CSV",
+    type=["csv"],
+    help="Maximum recommended file size: 10 MB",
+)
 sf_accounts = None
 if uploaded_file:
     sf_accounts = pd.read_csv(uploaded_file)
@@ -502,36 +505,53 @@ else:
     st.sidebar.success(f"✅ Matrix loaded ({len(set(k[0] for k in matrix_lookup.keys()))} countries)")
 
 # -----------------------------------------------
-# AI DEBUG INFO (sidebar)
+# AI DEBUG INFO (sidebar) — visible to admins only
 # -----------------------------------------------
-with st.sidebar.expander("🔧 AI Debug Info"):
-    st.markdown("**Model:** `gpt-4.1`")
-    st.markdown(f"**openai SDK:** `{openai.__version__}`")
-    if client is not None:
-        st.success("✅ OpenAI client initialised")
-        if _openai_api_key_display:
-            st.markdown(f"**API key:** `{_openai_api_key_display}`")
-    else:
-        st.error("❌ OpenAI client NOT initialised")
-        if _openai_init_error:
-            st.code(_openai_init_error)
+try:
+    _show_debug = st.secrets.get("show_debug", False)
+except Exception:
+    _show_debug = False
 
-    # Matrix diagnostic info
-    st.markdown("---")
-    st.markdown("**Matrix Lookup Debug:**")
-    if matrix_lookup:
-        _matrix_country_set = {k[0] for k in matrix_lookup.keys()}
-        st.markdown(f"Countries loaded: **{len(_matrix_country_set)}**")
-        _sample_keys = list(matrix_lookup.keys())[:5]
-        st.markdown("Sample keys (country, business_seg, customer_seg):")
-        for _sk in _sample_keys:
-            st.caption(f"`{_sk}`")
-    else:
-        st.warning("Matrix not loaded")
+if _show_debug:
+    with st.sidebar.expander("🔧 AI Debug Info"):
+        st.markdown("**Model:** `gpt-4.1`")
+        st.markdown(f"**openai SDK:** `{openai.__version__}`")
+        if client is not None:
+            st.success("✅ OpenAI client initialised")
+        else:
+            st.error("❌ OpenAI client NOT initialised")
+            if _openai_init_error:
+                st.code(_openai_init_error)
+
+        # Matrix diagnostic info
+        st.markdown("---")
+        st.markdown("**Matrix Lookup Debug:**")
+        if matrix_lookup:
+            _matrix_country_set = {k[0] for k in matrix_lookup.keys()}
+            st.markdown(f"Countries loaded: **{len(_matrix_country_set)}**")
+            _sample_keys = list(matrix_lookup.keys())[:5]
+            st.markdown("Sample keys (country, business_seg, customer_seg):")
+            for _sk in _sample_keys:
+                st.caption(f"`{_sk}`")
+        else:
+            st.warning("Matrix not loaded")
 
 # -----------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------
+def _highlight_conf(val):
+    """Colour-code a confidence score cell for use with DataFrame.style.map()."""
+    try:
+        v = float(val)
+        if v >= 90:
+            return 'background-color: #d4edda; color: #155724'
+        elif v >= 70:
+            return 'background-color: #fff3cd; color: #856404'
+        else:
+            return 'background-color: #f8d7da; color: #721c24'
+    except (ValueError, TypeError):
+        return ''
+
 def generate_name_variations(name):
     variations = [name.lower().strip()]
     words = name.lower().split()
@@ -1355,6 +1375,15 @@ with tab1:
         if _k not in st.session_state:
             st.session_state[_k] = _v
 
+    st.markdown(
+        """
+        **How to use this tool:**
+        Upload your Salesforce account list via the sidebar, then enter the account details below and
+        click **Run Checks**. The tool will check for potential duplicate accounts, research the
+        company online, and generate a recommended Fenergo segmentation.
+        """,
+    )
+
     st.markdown('<p class="fen-section-title">Enter Account Details</p>', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -1419,21 +1448,9 @@ with tab1:
 
         st.divider()
         st.markdown(
-            f'<p class="fen-section-title">Running checks for: {_account_name}</p>',
+            f'<p class="fen-section-title">Running checks for: {html_escape(_account_name)}</p>',
             unsafe_allow_html=True,
         )
-
-        def _highlight_conf(val):
-            try:
-                v = float(val)
-                if v >= 90:
-                    return 'background-color: #d4edda; color: #155724'
-                elif v >= 70:
-                    return 'background-color: #fff3cd; color: #856404'
-                else:
-                    return 'background-color: #f8d7da; color: #721c24'
-            except (ValueError, TypeError):
-                return ''
 
         # ── PARTNER FLOW ──────────────────────────────────────────────────────
         if _account_type == "Partner":
@@ -1456,7 +1473,7 @@ with tab1:
                 if _same_country:
                     st.warning(
                         "⚠️ Similar account found in the same country. "
-                        "Please check with Ken before proceeding."
+                        "Please check with the Account Owner before proceeding."
                     )
 
         # ── PROSPECT (and all non-Partner) FLOW ───────────────────────────────
@@ -1526,7 +1543,7 @@ with tab1:
                             _llm_data = enrich_with_llm(_research['snippets'], _account_name)
                             if '_llm_error' in _llm_data:
                                 st.warning(f"AI extraction unavailable: {_llm_data['_llm_error']}")
-                                if '_llm_traceback' in _llm_data:
+                                if _show_debug and '_llm_traceback' in _llm_data:
                                     with st.expander("🔍 Error details"):
                                         st.code(_llm_data['_llm_traceback'])
                                 _llm_status.update(
@@ -1646,10 +1663,11 @@ with tab1:
                         hl_style = 'background:#f8d7da;color:#721c24;padding:2px 6px;border-radius:4px;'
                     else:
                         hl_style = ''
+                    escaped_value = html_escape(value_string) if value_string != "—" else value_string
                     value_inner = (
-                        f'<span style="{hl_style}">{value_string}</span>'
+                        f'<span style="{hl_style}">{escaped_value}</span>'
                         if hl_style and value_string != "—"
-                        else value_string
+                        else escaped_value
                     )
                     return (
                         f'<div class="{css_class}">'
@@ -1792,7 +1810,8 @@ with tab3:
     new_customer_file = st.file_uploader(
         "Upload New Customer File (CSV or Excel)",
         type=["csv", "xlsx", "xls"],
-        key="account_matching_upload"
+        key="account_matching_upload",
+        help="Maximum recommended file size: 10 MB",
     )
 
     if new_customer_file is not None:
@@ -1905,6 +1924,38 @@ with tab3:
 
                 sf_records = sf_accounts.to_dict("records")
 
+                # Pre-compute normalised names for every SF record once to avoid
+                # repeated normalize_name() calls inside the inner loop (O(n²) → O(n+m)).
+                sf_records_normalised = []
+                for row in sf_records:
+                    acct_name_val = ""
+                    acct_norm = ""
+                    if sf_account_name_col:
+                        val = row.get(sf_account_name_col, "")
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if val_str:
+                                acct_name_val = val_str
+                                acct_norm = normalize_name(val_str)
+                    legal_name_val = ""
+                    legal_norm = ""
+                    if sf_legal_name_col:
+                        val = row.get(sf_legal_name_col, "")
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if val_str:
+                                legal_name_val = val_str
+                                legal_norm = normalize_name(val_str)
+                    sf_country_val = ""
+                    if sf_country_col:
+                        raw = row.get(sf_country_col, "")
+                        sf_country_val = str(raw).strip() if pd.notna(raw) else ""
+                    sf_records_normalised.append((
+                        acct_name_val, acct_norm,
+                        legal_name_val, legal_norm,
+                        sf_country_val,
+                    ))
+
                 results = []
                 progress = st.progress(0, text="Matching accounts...")
 
@@ -1915,39 +1966,21 @@ with tab3:
                     # Each entry: (rep_score, acct_name_val, legal_name_val, sf_country_val, acct_score, legal_score)
                     top_matches = []
 
-                    for row in sf_records:
+                    for acct_name_val, acct_norm, legal_name_val, legal_norm, sf_country_val in sf_records_normalised:
                         # ── Score against Account Name column ──────────────────────────
                         acct_score = 0
-                        acct_name_val = ""
-                        if sf_account_name_col:
-                            val = row.get(sf_account_name_col, "")
-                            if pd.notna(val):
-                                val_str = str(val).strip()
-                                if val_str:
-                                    acct_name_val = val_str
-                                    acct_score = compute_match_score(new_norm, normalize_name(val_str))
+                        if acct_name_val:
+                            acct_score = compute_match_score(new_norm, acct_norm)
 
                         # ── Score against Legal Name column ────────────────────────────
                         legal_score = 0
-                        legal_name_val = ""
-                        if sf_legal_name_col:
-                            val = row.get(sf_legal_name_col, "")
-                            if pd.notna(val):
-                                val_str = str(val).strip()
-                                if val_str:
-                                    legal_name_val = val_str
-                                    legal_score = compute_match_score(new_norm, normalize_name(val_str))
+                        if legal_name_val:
+                            legal_score = compute_match_score(new_norm, legal_norm)
 
                         # ── Combined score ─────────────────────────────────────────────
                         # If account name is exact (100) → overall = 100.
                         # Otherwise → 70% acct + 30% legal weighted blend.
                         rep_score = combined_score(acct_score, legal_score)
-
-                        # ── Country value for tie-breaking ────────────────────────────
-                        sf_country_val = ""
-                        if sf_country_col:
-                            raw = row.get(sf_country_col, "")
-                            sf_country_val = str(raw).strip() if pd.notna(raw) else ""
 
                         if rep_score > 0 and acct_name_val:
                             top_matches.append((
@@ -2037,20 +2070,8 @@ with tab3:
                 st.divider()
                 st.markdown('<p class="fen-section-title">Matching Results</p>', unsafe_allow_html=True)
 
-                def highlight_confidence(val):
-                    try:
-                        v = float(val)
-                        if v >= 90:
-                            return 'background-color: #d4edda; color: #155724'
-                        elif v >= 70:
-                            return 'background-color: #fff3cd; color: #856404'
-                        else:
-                            return 'background-color: #f8d7da; color: #721c24'
-                    except (ValueError, TypeError):
-                        return ''
-
                 styled_df = results_df.style.map(
-                    highlight_confidence,
+                    _highlight_conf,
                     subset=["Confidence Score (%)"]
                 )
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
