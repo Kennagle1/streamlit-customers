@@ -471,7 +471,47 @@ if uploaded_file:
 # -----------------------------------------------
 @st.cache_data
 def load_account_category_matrix():
-    """Load account category matrix. Tries multi-header first, falls back to single-header."""
+    """Load account category matrix.
+
+    Priority:
+    1. ``account_category_matrix v2.xlsx`` — single header row; column headers
+       are the concatenation of Customer Segment + Business Segment (no space).
+       Stored as 2-tuple keys: ``(country_lower, cs+bs_lower)`` → value.
+    2. ``account_category_matrix.xlsx`` — multi-header (primary) or
+       single-header with separator fallback.  Stored as 3-tuple keys:
+       ``(country_lower, bs_lower, cs_lower)`` → value.
+    """
+
+    # ── v2 (preferred) ────────────────────────────────────────────────────────
+    _v2_err = None
+    try:
+        df_v2 = pd.read_excel("account_category_matrix v2.xlsx", header=0, index_col=0)
+        lookup_v2 = {}
+        for country in df_v2.index:
+            if pd.isna(country):
+                continue
+            country_clean = str(country).strip().lower()
+            for col in df_v2.columns:
+                col_str = str(col).strip()
+                # Skip the Region column (not a segment combination)
+                if col_str.lower() == 'region':
+                    continue
+                # Strip zero-width spaces and other invisible Unicode characters
+                col_clean = col_str.replace('\u200b', '').replace('\u00a0', '').strip()
+                if not col_clean:
+                    continue
+                val = df_v2.loc[country, col]
+                if pd.notna(val) and str(val).strip():
+                    lookup_v2[(country_clean, col_clean.lower())] = str(val).strip()
+        if lookup_v2:
+            return lookup_v2, None
+        _v2_err = "account_category_matrix v2.xlsx loaded but contains no valid entries"
+    except FileNotFoundError:
+        _v2_err = "account_category_matrix v2.xlsx not found — falling back to v1"
+    except Exception as e_v2:
+        _v2_err = f"Error reading v2 matrix: {e_v2}"
+
+    # ── v1 fallback ───────────────────────────────────────────────────────────
     _primary_err = None
     try:
         df = pd.read_excel("account_category_matrix.xlsx", header=[0, 1], index_col=0)
@@ -781,9 +821,19 @@ def resolve_segment(detailed_segment_guess):
             return value
     return None
 
-def lookup_sf_ultimate_parent(sf_accounts, ultimate_parent):
-    """Search the SF upload for a row whose 'Ultimate Parent' column matches
+def lookup_sf_ultimate_parent(sf_accounts, ultimate_parent, account_name=""):
+    """Search the SF upload for rows whose 'Ultimate Parent' column matches
     *ultimate_parent* (exact normalised match or fuzzy ≥ 80).
+
+    When multiple matching rows exist with different Reporting Group values,
+    the Reporting Group whose name most closely matches *account_name* (via
+    fuzzy scoring) is returned.
+
+    Args:
+        sf_accounts: Salesforce accounts DataFrame.
+        ultimate_parent: The ultimate parent name to look up.
+        account_name: The original account name entered by the user — used to
+            pick the best Reporting Group when multiple candidates exist.
 
     Returns:
         (parent_account: str|None, reporting_group: str|None)
@@ -835,6 +885,11 @@ def lookup_sf_ultimate_parent(sf_accounts, ultimate_parent):
         return None, None
 
     ult_norm = normalize_name(ult_str)
+
+    # Collect all matching rows (same Ultimate Parent may appear multiple times
+    # with different Reporting Groups, e.g. "Mastercard" and "AiiA" both under
+    # "Mastercard Incorporated").
+    matches = []
     for _, row in sf_accounts.iterrows():
         sf_ult_raw = row.get(ult_parent_col, '')
         if pd.isna(sf_ult_raw) or str(sf_ult_raw).strip() == '':
@@ -851,9 +906,29 @@ def lookup_sf_ultimate_parent(sf_accounts, ultimate_parent):
                 raw = row.get(reporting_group_col, '')
                 if pd.notna(raw):
                     rgroup = str(raw).strip()
-            return parent_acct or None, rgroup or None
+            matches.append((parent_acct, rgroup))
 
-    return None, None
+    if not matches:
+        return None, None
+
+    # If only one match (or no account_name provided for tie-breaking), return
+    # the first result directly.
+    if len(matches) == 1 or not account_name:
+        pa, rg = matches[0]
+        return pa or None, rg or None
+
+    # Multiple matches: pick the Reporting Group most similar to account_name.
+    acct_norm = normalize_name(account_name)
+    best_pa, best_rg = matches[0]
+    best_score = compute_match_score(acct_norm, normalize_name(best_rg)) if best_rg else 0
+    for pa, rg in matches[1:]:
+        if rg:
+            score = compute_match_score(acct_norm, normalize_name(rg))
+            if score > best_score:
+                best_score = score
+                best_pa = pa
+                best_rg = rg
+    return best_pa or None, best_rg or None
 
 # -----------------------------------------------
 # G-SIB / D-SIB CHECKS
@@ -1038,23 +1113,46 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
     _country_normalized = str(country).strip().lower()
     if not matched_country:
         return "No match found", f"Country '{country}' not found in matrix (normalised lookup key: '{_country_normalized}')"
-    # Normalise business_segment and customer_segment: strip + lowercase for case-insensitive matching
-    bs_norm = str(business_segment).strip().lower()
-    cs_norm = str(customer_segment).strip().lower()
-    lookup_key = (matched_country, bs_norm, cs_norm)
-    if lookup_key in matrix_lookup:
-        return matrix_lookup[lookup_key], f"Matched: {matched_country.title()} | {business_segment} | {customer_segment}"
-    # Diagnostic: collect what business/customer segment keys exist for this country
-    _available_bs = sorted({k[1] for k in matrix_lookup if k[0] == matched_country})
-    _available_cs = sorted({k[2] for k in matrix_lookup if k[0] == matched_country})
-    return (
-        "No match found",
-        (
-            f"No matrix entry for {matched_country.title()} + '{business_segment}' + '{customer_segment}'. "
-            f"Available business segments for this country: {_available_bs[:5]}. "
-            f"Available customer segments: {_available_cs}."
+
+    # Detect matrix format from the first key's tuple length.
+    # v2 keys are 2-tuples: (country, customer_segment+business_segment)
+    # v1 keys are 3-tuples: (country, business_segment, customer_segment)
+    _sample_key = next(iter(matrix_lookup))
+    if len(_sample_key) == 2:
+        # v2 format: lookup key = (country, customer_segment + business_segment) — no space
+        cs_norm = str(customer_segment).strip().lower()
+        bs_norm = str(business_segment).strip().lower()
+        concat_key = cs_norm + bs_norm
+        lookup_key = (matched_country, concat_key)
+        if lookup_key in matrix_lookup:
+            return matrix_lookup[lookup_key], f"Matched (v2): {matched_country.title()} | {customer_segment} | {business_segment}"
+        # Diagnostic: show what keys are available for this country
+        _available = sorted({k[1] for k in matrix_lookup if k[0] == matched_country})
+        return (
+            "No match found",
+            (
+                f"No v2 matrix entry for {matched_country.title()} + '{customer_segment}{business_segment}'. "
+                f"Available segment keys for this country: {_available[:8]}."
+            )
         )
-    )
+    else:
+        # v1 format: lookup key = (country, business_segment, customer_segment)
+        bs_norm = str(business_segment).strip().lower()
+        cs_norm = str(customer_segment).strip().lower()
+        lookup_key = (matched_country, bs_norm, cs_norm)
+        if lookup_key in matrix_lookup:
+            return matrix_lookup[lookup_key], f"Matched: {matched_country.title()} | {business_segment} | {customer_segment}"
+        # Diagnostic: collect what business/customer segment keys exist for this country
+        _available_bs = sorted({k[1] for k in matrix_lookup if k[0] == matched_country})
+        _available_cs = sorted({k[2] for k in matrix_lookup if k[0] == matched_country})
+        return (
+            "No match found",
+            (
+                f"No matrix entry for {matched_country.title()} + '{business_segment}' + '{customer_segment}'. "
+                f"Available business segments for this country: {_available_bs[:5]}. "
+                f"Available customer segments: {_available_cs}."
+            )
+        )
 
 # -----------------------------------------------
 # SECONDARY ACCOUNT OWNER
@@ -1695,7 +1793,7 @@ with tab1:
                         # Lookup Parent Account and Reporting Group from SF upload
                         _ult_parent_llm = _research.get('ultimate_parent', '')
                         if _ult_parent_llm and sf_accounts is not None:
-                            _sf_parent_acct, _sf_rgroup = lookup_sf_ultimate_parent(sf_accounts, _ult_parent_llm)
+                            _sf_parent_acct, _sf_rgroup = lookup_sf_ultimate_parent(sf_accounts, _ult_parent_llm, account_name=_account_name)
                             if _sf_parent_acct:
                                 _research['_parent_account'] = _sf_parent_acct
                             if _sf_rgroup:
@@ -2238,6 +2336,194 @@ with tab3:
             Ensure the Salesforce Accounts CSV is also loaded in the sidebar.</p>
         </div>
         """, unsafe_allow_html=True)
+
+    # ── BULK CUSTOMER ENRICHMENT ──────────────────────────────────────────────
+    st.divider()
+    st.markdown('<p class="fen-section-title">Bulk Customer Enrichment</p>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        Upload a CSV containing **Account Name** and **Country** columns to generate
+        the same data points as the **Customer Attributes** tab for multiple customers
+        at once. The tool uses the identical enrichment logic — LLM web research,
+        segment resolution, and Account Category lookup — for every row.
+        """
+    )
+
+    bulk_enrich_file = st.file_uploader(
+        "Upload CSV (Account Name + Country)",
+        type=["csv"],
+        key="bulk_enrich_upload",
+        help="Must contain at least Account Name and Country columns. Maximum recommended size: 10 MB.",
+    )
+
+    if bulk_enrich_file is not None:
+        try:
+            bulk_df_raw = pd.read_csv(bulk_enrich_file)
+        except Exception as _e:
+            st.error(f"Error reading bulk enrichment file: {_e}")
+        else:
+            # ── Auto-detect columns ──────────────────────────────────────────
+            _b_cols = bulk_df_raw.columns.tolist()
+            _b_cols_lc = {c: c.lower().strip() for c in _b_cols}
+
+            # Account Name column
+            _b_name_col = None
+            for _c in _b_cols:
+                if _b_cols_lc[_c] in ('account name', 'accountname', 'account'):
+                    _b_name_col = _c
+                    break
+            if _b_name_col is None:
+                for _c in _b_cols:
+                    if any(kw in _b_cols_lc[_c] for kw in ('name', 'customer', 'company', 'organisation', 'organization')):
+                        _b_name_col = _c
+                        break
+            if _b_name_col is None and _b_cols:
+                _b_name_col = _b_cols[0]
+
+            # Country column
+            _b_country_col = None
+            for _c in _b_cols:
+                if _b_cols_lc[_c] == 'country':
+                    _b_country_col = _c
+                    break
+            if _b_country_col is None:
+                for _c in _b_cols:
+                    if 'country' in _b_cols_lc[_c]:
+                        _b_country_col = _c
+                        break
+
+            _b_name_col = st.selectbox(
+                "Account Name column",
+                options=_b_cols,
+                index=_b_cols.index(_b_name_col) if _b_name_col in _b_cols else 0,
+                key="bulk_name_col",
+            )
+            _b_country_col_opts = ["(none)"] + _b_cols
+            _b_country_default_idx = (
+                _b_country_col_opts.index(_b_country_col)
+                if _b_country_col and _b_country_col in _b_country_col_opts
+                else 0
+            )
+            _b_country_col_sel = st.selectbox(
+                "Country column",
+                options=_b_country_col_opts,
+                index=_b_country_default_idx,
+                key="bulk_country_col",
+            )
+            _b_country_col = _b_country_col_sel if _b_country_col_sel != "(none)" else None
+
+            st.info(f"📋 **{len(bulk_df_raw)}** rows loaded from uploaded file.")
+
+            if client is None:
+                st.error("⚠️ OpenAI client not configured — bulk enrichment requires the AI research step.")
+            else:
+                run_bulk = st.button(
+                    "▶ Run Bulk Enrichment",
+                    type="primary",
+                    use_container_width=True,
+                    key="run_bulk_enrich",
+                )
+
+                if run_bulk:
+                    _bulk_rows = bulk_df_raw.dropna(subset=[_b_name_col]).to_dict("records")
+                    _bulk_results = []
+                    _bulk_progress = st.progress(0, text="Enriching accounts...")
+                    _bulk_total = len(_bulk_rows)
+
+                    for _bi, _brow in enumerate(_bulk_rows):
+                        _b_acct_name = str(_brow.get(_b_name_col, "")).strip()
+                        _b_country = (
+                            str(_brow.get(_b_country_col, "")).strip()
+                            if _b_country_col else ""
+                        )
+                        _b_region = COUNTRY_REGION_MAP.get(_b_country, "")
+
+                        # Step A: LLM enrichment (same as Tab 1 Step 2)
+                        _b_research = {}
+                        try:
+                            _b_llm_data = enrich_with_llm([], _b_acct_name)
+                            if '_llm_error' not in _b_llm_data:
+                                _empty = {None, 'Not found', 'N/A', ''}
+                                for _k, _v in _b_llm_data.items():
+                                    if _k == 'sources':
+                                        if isinstance(_v, dict):
+                                            _b_research[_k] = _v
+                                    elif _k.startswith('_'):
+                                        _b_research[_k] = _v
+                                    elif _v not in _empty:
+                                        _b_research[_k] = _v
+                        except Exception:
+                            pass
+
+                        # Step B: resolve segment roll-ups from hierarchy
+                        _b_det_seg = _b_research.get('detailed_business_segment', '')
+                        if _b_det_seg:
+                            _b_seg_resolved = resolve_segment(_b_det_seg)
+                            if _b_seg_resolved:
+                                _b_research['business_segment'] = _b_seg_resolved['business']
+                                _b_research['market_segment'] = _b_seg_resolved['market']
+
+                        # Step C: Parent Account + Reporting Group from SF upload
+                        _b_ult_parent = _b_research.get('ultimate_parent', '')
+                        _b_parent_acct = ''
+                        _b_rgroup = ''
+                        if _b_ult_parent and sf_accounts is not None:
+                            _b_sf_pa, _b_sf_rg = lookup_sf_ultimate_parent(
+                                sf_accounts, _b_ult_parent, account_name=_b_acct_name
+                            )
+                            if _b_sf_pa:
+                                _b_parent_acct = _b_sf_pa
+                            if _b_sf_rg:
+                                _b_rgroup = _b_sf_rg
+                            elif _b_research.get('reporting_group_suggestion'):
+                                _b_rgroup = _b_research['reporting_group_suggestion']
+                        elif _b_research.get('reporting_group_suggestion'):
+                            _b_rgroup = _b_research['reporting_group_suggestion']
+
+                        # Step D: segmentation (customer segment, account category, secondary owner)
+                        _b_segmentation = apply_segmentation(
+                            _b_research, _b_acct_name, _b_region, _b_country
+                        )
+
+                        _bulk_results.append({
+                            "Account Name":              _b_acct_name,
+                            "Country":                   _b_country,
+                            "Region":                    _b_region,
+                            "Legal Name":                _b_research.get('legal_name', ''),
+                            "Ultimate Parent":           _b_ult_parent,
+                            "Parent Account":            _b_parent_acct,
+                            "Reporting Group":           _b_rgroup,
+                            "Detailed Business Segment": _b_research.get('detailed_business_segment', ''),
+                            "Business Segment":          _b_research.get('business_segment', ''),
+                            "Market Segment":            _b_research.get('market_segment', ''),
+                            "Customer Segment":          _b_segmentation.get('customer_segment', ''),
+                            "Account Category":          _b_segmentation.get('account_category', ''),
+                            "Secondary Account Owner":   _b_segmentation.get('secondary_account_owner', ''),
+                            "Annual Revenue":             _b_research.get('annual_revenue_eur', ''),
+                            "Employees":                 _b_research.get('employees', ''),
+                            "AUM":                       _b_research.get('aum_eur', ''),
+                        })
+
+                        _bulk_progress.progress(
+                            (_bi + 1) / _bulk_total,
+                            text=f"Enriching accounts... {_bi + 1}/{_bulk_total} — {_b_acct_name}"
+                        )
+
+                    _bulk_progress.empty()
+
+                    st.success(f"✅ Bulk enrichment complete — {len(_bulk_results)} accounts processed.")
+                    _bulk_results_df = pd.DataFrame(_bulk_results)
+                    st.dataframe(_bulk_results_df, use_container_width=True, hide_index=True)
+
+                    _bulk_csv_buf = io.StringIO()
+                    _bulk_results_df.to_csv(_bulk_csv_buf, index=False)
+                    st.download_button(
+                        label="⬇️ Download Results as CSV",
+                        data=_bulk_csv_buf.getvalue().encode("utf-8"),
+                        file_name="bulk_enrichment_results.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
 
 # ===============================================
 # TAB 4 — ICP ANALYSIS (placeholder)
