@@ -20,6 +20,15 @@ import traceback
 st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", page_icon="🏦")
 
 # -----------------------------------------------
+# APPLICATION CONSTANTS
+# -----------------------------------------------
+APP_VERSION = "2.1"
+MAX_RESPONSES_API_RETRIES = 2          # Retry attempts for Responses API before fallback
+_CAT_REGEX_12 = r'\b(cat|category)\s*[12]\b'   # matches "Cat 1", "Cat 2", "Category 1", etc.
+_CAT_REGEX_3  = r'\b(cat|category)\s*3\b'       # matches "Cat 3", "Category 3"
+_CAT_SECONDARY_OWNER_REGEX = r'\b(cat|category)\s*1\b'  # for secondary owner assignment
+
+# -----------------------------------------------
 # OPENAI CLIENT
 # -----------------------------------------------
 _openai_init_error = None
@@ -270,11 +279,410 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
+# Extended styles: animations, stepper, field population logic, visual diagrams, footer
 st.markdown("""
-<div class="fenergo-header">
-    <h1>fener<span style="color:#21CFB2">g</span><span style="color:#ffffff">o</span>&nbsp;&nbsp;|&nbsp;&nbsp;</h1>
-    <span>&nbsp;Account Intelligence</span>
+<style>
+    /* ── Tab switch animation ─────────────────────────────────────── */
+    .stTabs [data-baseweb="tab-panel"] {
+        animation: fadeInTab 0.25s ease;
+    }
+    @keyframes fadeInTab {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0);   }
+    }
+
+    /* ── Improved card hover effects ────────────────────────────────── */
+    .fen-card {
+        transition: box-shadow 0.2s ease, transform 0.15s ease;
+    }
+    .fen-card:hover {
+        box-shadow: 0 4px 16px rgba(0,46,51,0.15);
+        transform: translateY(-1px);
+    }
+
+    /* ── Button transitions ─────────────────────────────────────────── */
+    .stButton > button {
+        transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease !important;
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(33,207,178,0.35) !important;
+    }
+    .stButton > button:active {
+        transform: translateY(0) !important;
+    }
+
+    /* ── Improved metrics cards ─────────────────────────────────────── */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #ffffff 0%, #f0f9f8 100%);
+        border: 1px solid #dde8e8;
+        border-radius: 10px;
+        padding: 16px 20px !important;
+        box-shadow: 0 2px 8px rgba(0,46,51,0.07);
+        transition: box-shadow 0.2s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        box-shadow: 0 4px 16px rgba(0,46,51,0.13);
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 800 !important;
+        color: #002E33 !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #5a7a7a !important;
+        font-size: 0.8rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    /* ── Sidebar status indicator ─────────────────────────────────── */
+    .sidebar-status {
+        background: rgba(33,207,178,0.12);
+        border: 1px solid rgba(33,207,178,0.3);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 0.78rem;
+        color: #21CFB2;
+        margin-top: 12px;
+    }
+
+    /* ── 3-step workflow stepper ─────────────────────────────────── */
+    .workflow-stepper {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+        margin: 20px 0 28px 0;
+    }
+    .workflow-step {
+        background: #f0f9f8;
+        border: 2px solid #21CFB2;
+        border-radius: 10px;
+        padding: 16px 18px;
+        position: relative;
+        transition: box-shadow 0.2s ease, transform 0.15s ease;
+    }
+    .workflow-step:hover {
+        box-shadow: 0 4px 14px rgba(33,207,178,0.28);
+        transform: translateY(-2px);
+    }
+    .workflow-step-num {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #21CFB2;
+        color: #002E33;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 1rem;
+        margin-bottom: 10px;
+    }
+    .workflow-step-title {
+        color: #002E33;
+        font-weight: 700;
+        font-size: 0.92rem;
+        margin-bottom: 6px;
+    }
+    .workflow-step-desc {
+        color: #5a7a7a;
+        font-size: 0.81rem;
+        line-height: 1.55;
+    }
+    .workflow-step-arrow {
+        position: absolute;
+        right: -10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #21CFB2;
+        font-size: 1.2rem;
+        z-index: 2;
+    }
+
+    /* ── Dropzone container ───────────────────────────────────────── */
+    .dropzone-container {
+        border: 2px dashed #21CFB2;
+        border-radius: 10px;
+        padding: 18px 20px;
+        background: linear-gradient(135deg, #f0f9f8 0%, #e8f7f5 100%);
+        margin-bottom: 12px;
+        transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    .dropzone-container:hover {
+        border-color: #002E33;
+        background: #e0f5f1;
+    }
+    .dropzone-label {
+        color: #002E33;
+        font-weight: 700;
+        font-size: 0.95rem;
+        margin-bottom: 6px;
+    }
+    .dropzone-hint {
+        color: #5a7a7a;
+        font-size: 0.82rem;
+        margin-top: 4px;
+    }
+
+    /* ── Field Population Logic cards ────────────────────────────── */
+    .fpl-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 12px;
+    }
+    .fpl-card {
+        background: white;
+        border-radius: 10px;
+        padding: 16px 20px;
+        border-left: 4px solid #21CFB2;
+        box-shadow: 0 1px 6px rgba(0,46,51,0.08);
+        transition: box-shadow 0.2s ease, transform 0.15s ease;
+    }
+    .fpl-card:hover {
+        box-shadow: 0 5px 18px rgba(0,46,51,0.15);
+        transform: translateY(-2px);
+    }
+    .fpl-field-name {
+        color: #002E33;
+        font-weight: 700;
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+    }
+    .fpl-badges { margin-bottom: 8px; }
+    .fpl-source-badge {
+        display: inline-block;
+        padding: 2px 9px;
+        border-radius: 12px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        margin-right: 4px;
+        margin-bottom: 3px;
+    }
+    .badge-ai     { background: #e8f0fe; color: #1a56db; }
+    .badge-web    { background: #d1fae5; color: #065f46; }
+    .badge-matrix { background: #fef3c7; color: #92400e; }
+    .badge-user   { background: #ede9fe; color: #4c1d95; }
+    .badge-sf     { background: #d1fae5; color: #047857; }
+    .badge-rules  { background: #fce7f3; color: #9d174d; }
+    .fpl-description {
+        color: #4a5568;
+        font-size: 0.84rem;
+        line-height: 1.6;
+    }
+    .fpl-section-header {
+        color: #002E33;
+        font-size: 1.05rem;
+        font-weight: 700;
+        border-bottom: 2px solid #21CFB2;
+        padding-bottom: 6px;
+        margin: 22px 0 14px 0;
+    }
+
+    /* ── Customer Segment Logic flowchart ────────────────────────── */
+    .fc-outer {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid #dde8e8;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    .fc-rule-banner {
+        background: linear-gradient(90deg, #002E33 0%, #004a52 100%);
+        color: white;
+        border-radius: 8px;
+        padding: 12px 18px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .fc-segments-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
+    }
+    .fc-segment-card {
+        border: 1px solid #dde8e8;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .fc-seg-header {
+        background: #002E33;
+        color: #21CFB2;
+        font-weight: 700;
+        font-size: 0.88rem;
+        padding: 9px 14px;
+        letter-spacing: 0.3px;
+    }
+    .fc-metric-group {
+        padding: 10px 14px;
+        border-bottom: 1px solid #f0f4f4;
+    }
+    .fc-metric-group:last-child { border-bottom: none; }
+    .fc-metric-label {
+        font-size: 0.78rem;
+        color: #706e6b;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-bottom: 6px;
+    }
+    .fc-tiers { display: flex; flex-direction: column; gap: 3px; }
+    .fc-tier {
+        padding: 4px 10px;
+        border-radius: 5px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .fc-enterprise { background: #d4edda; color: #155724; }
+    .fc-midmarket  { background: #fff3cd; color: #856404; }
+    .fc-scaleup    { background: #f8d7da; color: #721c24; }
+    .fc-na         { background: #f3f3f3; color: #706e6b; font-style: italic; }
+    .fc-legend {
+        display: flex;
+        gap: 16px;
+        margin-top: 14px;
+        padding: 10px 14px;
+        background: #f8fafa;
+        border-radius: 8px;
+        font-size: 0.8rem;
+    }
+    .fc-legend-item { display: flex; align-items: center; gap: 6px; }
+    .fc-legend-dot {
+        width: 12px; height: 12px; border-radius: 3px;
+    }
+
+    /* ── Fenergo Segmentation visual tree ────────────────────────── */
+    .seg-tree-outer {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid #dde8e8;
+        padding: 20px;
+        margin-bottom: 20px;
+        overflow-x: auto;
+    }
+    .seg-market-section {
+        margin-bottom: 22px;
+    }
+    .seg-market-label {
+        background: linear-gradient(90deg, #002E33 0%, #004a52 100%);
+        color: #21CFB2;
+        font-weight: 700;
+        font-size: 0.88rem;
+        padding: 8px 16px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        letter-spacing: 0.3px;
+    }
+    .seg-business-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-left: 20px;
+    }
+    .seg-business-card {
+        background: #f0f9f8;
+        border: 1px solid #21CFB2;
+        border-radius: 8px;
+        overflow: hidden;
+        min-width: 180px;
+        max-width: 240px;
+        flex: 1;
+    }
+    .seg-business-header {
+        background: #21CFB2;
+        color: #002E33;
+        font-weight: 700;
+        font-size: 0.8rem;
+        padding: 6px 12px;
+    }
+    .seg-detailed-list {
+        padding: 8px 12px;
+    }
+    .seg-detailed-item {
+        font-size: 0.78rem;
+        color: #002E33;
+        padding: 2px 0;
+        border-bottom: 1px solid rgba(33,207,178,0.15);
+        line-height: 1.4;
+    }
+    .seg-detailed-item:last-child { border-bottom: none; }
+
+    /* ── Professional footer ──────────────────────────────────────── */
+    .fen-footer {
+        background: #002E33;
+        color: rgba(255,255,255,0.6);
+        border-radius: 8px;
+        padding: 14px 24px;
+        margin-top: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.78rem;
+    }
+    .fen-footer-brand {
+        color: #21CFB2;
+        font-weight: 700;
+    }
+    .fen-footer-version {
+        background: rgba(33,207,178,0.15);
+        color: #21CFB2;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.74rem;
+        font-weight: 600;
+    }
+
+    /* ── Divider animation ────────────────────────────────────────── */
+    hr {
+        border: none;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #21CFB2, transparent);
+        margin: 20px 0;
+        animation: shimmer 2s ease infinite;
+    }
+    @keyframes shimmer {
+        0%   { opacity: 0.5; }
+        50%  { opacity: 1;   }
+        100% { opacity: 0.5; }
+    }
+
+    /* ── Improved data freshness / alert styling ─────────────────── */
+    [data-testid="stAlert"] {
+        border-radius: 8px !important;
+        border-left-width: 4px !important;
+    }
+
+    /* ── Breadcrumb context indicator ────────────────────────────── */
+    .fen-breadcrumb {
+        font-size: 0.78rem;
+        color: #5a7a7a;
+        margin-bottom: 16px;
+        padding: 6px 0;
+        border-bottom: 1px solid #e8eef0;
+    }
+    .fen-breadcrumb span { color: #21CFB2; font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
+
+# Header
+st.markdown(f"""
+<div class="fenergo-header" style="background: linear-gradient(90deg, #002E33 0%, #003d43 60%, #002E33 100%); padding: 18px 32px; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
+    <div style="display:flex; align-items:center;">
+        <h1 style="color:#21CFB2; font-size:1.6rem; font-weight:700; margin:0; font-family:sans-serif; letter-spacing:0.5px;">
+            fener<span style="color:#21CFB2">g</span><span style="color:#ffffff">o</span>
+        </h1>
+        <span style="color:#ffffff; font-size:1.6rem; font-weight:700; font-family:sans-serif;">&nbsp;&nbsp;|&nbsp;&nbsp;Account Intelligence</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px;">
+        <span style="color:rgba(255,255,255,0.5); font-size:0.78rem;">🟢 System Operational</span>
+        <span style="background:rgba(33,207,178,0.18); color:#21CFB2; padding:3px 10px; border-radius:10px; font-size:0.75rem; font-weight:600;">v{APP_VERSION}</span>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -573,6 +981,16 @@ if matrix_error:
 else:
     st.sidebar.success(f"✅ Matrix loaded ({len(set(k[0] for k in matrix_lookup.keys()))} countries)")
 
+# Sidebar status / powered-by indicator
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"""
+<div class="sidebar-status">
+🤖 Powered by OpenAI gpt-4.1<br>
+🔍 rapidfuzz · pandas · DuckDuckGo<br>
+<span style="color:rgba(255,255,255,0.5); font-size:0.72rem;">Account Intelligence Platform v{APP_VERSION}</span>
+</div>
+""", unsafe_allow_html=True)
+
 # -----------------------------------------------
 # AI DEBUG INFO (sidebar) — visible to admins only
 # -----------------------------------------------
@@ -620,6 +1038,12 @@ def _highlight_conf(val):
             return 'background-color: #f8d7da; color: #721c24'
     except (ValueError, TypeError):
         return ''
+
+def format_account_category(cat):
+    """Format account category for display: 'Cat 1' → 'Category 1', etc."""
+    if not cat:
+        return cat
+    return re.sub(r'\bCat\s*(\d+)\b', r'Category \1', str(cat), flags=re.IGNORECASE)
 
 def generate_name_variations(name):
     variations = [name.lower().strip()]
@@ -1160,7 +1584,7 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
 def get_secondary_account_owner(region, account_category):
     region_upper = (region or '').upper()
     if "AMER" in region_upper or "AMERICAS" in region_upper:
-        if account_category and "cat 1" in str(account_category).lower():
+        if account_category and re.search(_CAT_SECONDARY_OWNER_REGEX, str(account_category).lower()):
             return "Elaine Zhang"
         else:
             current_month = datetime.now().month
@@ -1320,6 +1744,7 @@ Use null for fields you cannot determine. For segment fields, pick the single be
         extracted = None
 
         # --- Primary path: Responses API with web_search tool for live internet data ---
+        # Up to MAX_RESPONSES_API_RETRIES retries before falling back to Chat Completions.
         _responses_api_error = None
         _search_method = None
 
@@ -1332,48 +1757,57 @@ Use null for fields you cannot determine. For segment fields, pick the single be
             "authoritative/recent data. Return your response as a JSON object."
         )
 
-        try:
-            resp_data = client.responses.create(
-                model="gpt-4.1",
-                tools=[{"type": "web_search_preview"}],
-                input=combined_input,
-            )
-
-            # Use SDK's built-in property to extract text from the response
-            text_content = resp_data.output_text or ""
-
-            # Strip markdown code fences if present (e.g. ```json ... ```)
-            text_content = text_content.strip()
-            if text_content.startswith("```"):
-                lines = text_content.split("\n")
-                if len(lines) >= 3:
-                    text_content = "\n".join(lines[1:-1]).strip()
-
-            # Remove any citation annotations like 【4:0†source】
-            text_content = re.sub(r'【[^】]*】', '', text_content)
-
-            # If still not valid JSON, try to extract the JSON object
-            if text_content and not text_content.startswith("{"):
-                first_brace = text_content.find("{")
-                last_brace = text_content.rfind("}")
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    text_content = text_content[first_brace:last_brace + 1]
-
-            if not text_content:
-                raise ValueError(f"Responses API returned empty text after cleanup. Raw output_text: {repr(resp_data.output_text)[:500]}")
-
-            extracted = json.loads(text_content)
-            _search_method = "responses_api_web_search"
-        except Exception as e:
-            _raw_preview = ""
+        for _attempt in range(MAX_RESPONSES_API_RETRIES + 1):
             try:
-                if 'resp_data' in locals():
-                    _raw_preview = f" | Raw output_text preview: {repr(resp_data.output_text)[:300]}"
-            except Exception:
-                pass
-            _responses_api_error = f"{e}{_raw_preview}"
+                resp_data = client.responses.create(
+                    model="gpt-4.1",
+                    tools=[{"type": "web_search_preview"}],
+                    input=combined_input,
+                )
 
-        # --- Fallback path: Chat Completions API ---
+                # Use SDK's built-in property to extract text from the response
+                text_content = resp_data.output_text or ""
+
+                # Strip markdown code fences if present (e.g. ```json ... ```)
+                text_content = text_content.strip()
+                if text_content.startswith("```"):
+                    lines = text_content.split("\n")
+                    if len(lines) >= 3:
+                        text_content = "\n".join(lines[1:-1]).strip()
+
+                # Remove any citation annotations like 【4:0†source】
+                text_content = re.sub(r'【[^】]*】', '', text_content)
+
+                # If still not valid JSON, try to extract the JSON object
+                if text_content and not text_content.startswith("{"):
+                    first_brace = text_content.find("{")
+                    last_brace = text_content.rfind("}")
+                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                        text_content = text_content[first_brace:last_brace + 1]
+
+                if not text_content:
+                    raise ValueError(f"Responses API returned empty text after cleanup. Raw output_text: {repr(resp_data.output_text)[:500]}")
+
+                extracted = json.loads(text_content)
+                _search_method = "responses_api_web_search"
+                break  # success — exit retry loop
+            except Exception as e:
+                _raw_preview = ""
+                try:
+                    if 'resp_data' in locals():
+                        _raw_preview = f" | Raw output_text preview: {repr(resp_data.output_text)[:300]}"
+                except Exception:
+                    pass
+                _attempt_msg = f"[Attempt {_attempt + 1}/{MAX_RESPONSES_API_RETRIES + 1}] {type(e).__name__}: {e}{_raw_preview}"
+                if _responses_api_error:
+                    _responses_api_error += f" || {_attempt_msg}"
+                else:
+                    _responses_api_error = _attempt_msg
+                if _attempt < MAX_RESPONSES_API_RETRIES:
+                    continue  # retry
+                # All retries exhausted — fall through to Chat Completions
+
+        # --- Fallback path: Chat Completions API (training data only) ---
         if extracted is None:
             # Build a modified system prompt that prohibits URL fabrication since this
             # path has no internet access (only training data).
@@ -1587,12 +2021,12 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
 # TABS
 # -----------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "Customer Attributes", "Lead Matching", "Account Matching", "ICP Analysis",
-    "Customer Segment Logic", "Fenergo Segmentation"
+    "Single Account Enrichment", "Bulk Account Enrichment", "Lead Matching",
+    "Customer Segment Logic", "Fenergo Segmentation", "Field Population Logic"
 ])
 
 # ===============================================
-# TAB 1 — CUSTOMER ATTRIBUTES
+# TAB 1 — SINGLE ACCOUNT ENRICHMENT
 # ===============================================
 with tab1:
 
@@ -1607,12 +2041,13 @@ with tab1:
         if _k not in st.session_state:
             st.session_state[_k] = _v
 
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Single Account Enrichment</span></div>', unsafe_allow_html=True)
     st.markdown(
         """
         **How to use this tool:**
         Upload your Salesforce account list via the sidebar, then enter the account details below and
-        click **Run Checks**. The tool will check for potential duplicate accounts, research the
-        company online, and generate a recommended Fenergo segmentation.
+        click **Run Enrichment Checks**. The tool will check for potential duplicate accounts, research the
+        company online using AI with live web search, and generate a recommended Fenergo segmentation.
         """,
     )
 
@@ -1772,10 +2207,13 @@ with tab1:
                                 st.write("✅ Used Responses API (gpt-4.1) with live web search")
                             elif _search_method_val == "chat_completions_fallback":
                                 st.warning(
-                                    "⚠️ Responses API failed, fell back to Chat Completions (training data only)"
+                                    "⚠️ **TRAINING DATA FALLBACK** — Live web search (Responses API) was "
+                                    "unavailable after 2 retries. Data was sourced from AI training data and "
+                                    "**may be significantly outdated**. Revenue and employee figures will be "
+                                    "annotated accordingly."
                                 )
                             if _resp_err:
-                                st.caption(f"ℹ️ Responses API error: {_resp_err}")
+                                st.caption(f"🔍 Responses API error detail: {_resp_err}")
                             _status.update(
                                 label=f"Step 2: AI extraction complete ({len(_fields_found)} fields)",
                                 state="complete",
@@ -1904,13 +2342,13 @@ with tab1:
                         f'</div>'
                     )
 
-                # Account Category colour coding (Issue 7)
+                # Account Category colour coding — apply display formatting then colour-code
                 # Use word-boundary regex to avoid false positives like "cat 12" → "cat 1"
-                _acct_cat_val = _segmentation.get('account_category', '')
+                _acct_cat_val = format_account_category(_segmentation.get('account_category', ''))
                 _acct_cat_lower = str(_acct_cat_val).lower()
-                if re.search(r'\bcat\s*[12]\b', _acct_cat_lower):
+                if re.search(_CAT_REGEX_12, _acct_cat_lower):
                     _acct_cat_highlight = 'green'
-                elif re.search(r'\bcat\s*3\b', _acct_cat_lower):
+                elif re.search(_CAT_REGEX_3, _acct_cat_lower):
                     _acct_cat_highlight = 'red'
                 else:
                     _acct_cat_highlight = None
@@ -1990,12 +2428,13 @@ with tab1:
                 _search_method_display = _research.get('_search_method')
                 _resp_api_err_display = _research.get('_responses_api_error')
                 if _search_method_display == "responses_api_web_search":
-                    st.success("🌐 Data sourced from live web search (OpenAI gpt-4.1)")
+                    st.success("🌐 **Live data** — sourced via real-time web search (OpenAI gpt-4.1 Responses API)")
                 elif _search_method_display == "chat_completions_fallback":
-                    _err_detail = f" Last error: {_resp_api_err_display}." if _resp_api_err_display else ""
+                    _err_detail = f"\n\n🔍 **Error detail:** {_resp_api_err_display}" if _resp_api_err_display else ""
                     st.warning(
-                        f"⚠️ Data sourced from AI training data (may be outdated).{_err_detail} "
-                        "Responses API with web_search was unavailable; fell back to Chat Completions."
+                        f"⚠️ **TRAINING DATA FALLBACK** — Live web search (Responses API) was unavailable "
+                        f"after 2 retries. Data sourced from AI training data and **may be significantly outdated**. "
+                        f"Revenue and employee figures are annotated with '(training data, may be outdated)'.{_err_detail}"
                     )
 
                 # Alternative segment warning (Change 6)
@@ -2009,44 +2448,62 @@ with tab1:
                     )
 
 # ===============================================
-# TAB 2 — LEAD MATCHING (placeholder)
+# TAB 2 — BULK ACCOUNT ENRICHMENT
 # ===============================================
 with tab2:
-    st.markdown("""
-    <div class="placeholder-box">
-        <h3>Lead Matching</h3>
-        <p>This module is coming soon.<br>
-        It will automatically match enriched accounts against open leads in Salesforce,<br>
-        surfacing potential overlaps and routing recommendations.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Bulk Account Enrichment</span></div>', unsafe_allow_html=True)
 
-# ===============================================
-# TAB 3 — ACCOUNT MATCHING
-# ===============================================
-with tab3:
-    st.markdown('<p class="fen-section-title">Account Matching</p>', unsafe_allow_html=True)
+    # 3-step workflow stepper
+    st.markdown("""
+<div class="workflow-stepper">
+  <div class="workflow-step">
+    <div class="workflow-step-num">1</div>
+    <div class="workflow-step-title">⬆️ Upload &amp; Match</div>
+    <div class="workflow-step-desc">Upload your list of potential new accounts. Each account is fuzzy-matched against your existing Salesforce accounts to identify overlaps.</div>
+  </div>
+  <div class="workflow-step">
+    <div class="workflow-step-num">2</div>
+    <div class="workflow-step-title">📥 Review &amp; Download</div>
+    <div class="workflow-step-desc">Download the matching results as CSV. Review the matches — identify which accounts did <strong>not</strong> match (new accounts that need to be created).</div>
+  </div>
+  <div class="workflow-step">
+    <div class="workflow-step-num">3</div>
+    <div class="workflow-step-title">✨ Enrich &amp; Create</div>
+    <div class="workflow-step-desc">Run unmatched accounts through Bulk Enrichment below. Download the enriched CSV and import into Salesforce to create the new records.</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown('<p class="fen-section-title">Step 1 — Account Matching</p>', unsafe_allow_html=True)
     NO_VALUE_PLACEHOLDER = "—"
     HIGH_CONFIDENCE_THRESHOLD = 80
     MAX_TOP_MATCHES_TO_CONSIDER = 10
 
     st.markdown(f"""
-    Upload a **New Customer** file (CSV or Excel) containing a list of customer names.  
-    The tool will fuzzy-match each name against **Account Name** and **Legal Name**  
-    in the **Salesforce Accounts CSV** uploaded in the sidebar,  
-    returning a combined confidence score, a primary suggested match, and a secondary match where applicable.
+Upload your list of potential new accounts (CSV or Excel). Each name is fuzzy-matched against the
+**Account Name** and **Legal Name** columns in the Salesforce Accounts CSV loaded in the sidebar.
+Results show a confidence score — accounts below the threshold are marked **"No match found"** and
+are candidates for new record creation via Step 3.
 
-    **Scoring rules:**
-    - **100%** = exact Account Name match (after normalisation) — no blending applied
-    - Otherwise: **{int(ACCT_WEIGHT*100)}% Account Name** + **{int(LEGAL_WEIGHT*100)}% Legal Name** weighted blend
-    - Both the matched Account Name and Legal Name are shown for Primary and Secondary matches
-    """)
+**Scoring rules:**
+- **100%** = exact Account Name match (after normalisation) — no blending applied
+- Otherwise: **{int(ACCT_WEIGHT*100)}% Account Name** + **{int(LEGAL_WEIGHT*100)}% Legal Name** weighted blend
+- Both the matched Account Name and Legal Name are shown for Primary and Secondary matches
+""")
+
+    st.markdown("""
+<div class="dropzone-container">
+  <div class="dropzone-label">📂 Upload New Customer File (CSV or Excel)</div>
+  <div class="dropzone-hint">Drag &amp; drop your file here, or click Browse to select — CSV, XLSX, or XLS formats supported.</div>
+</div>
+""", unsafe_allow_html=True)
 
     new_customer_file = st.file_uploader(
         "Upload New Customer File (CSV or Excel)",
         type=["csv", "xlsx", "xls"],
         key="account_matching_upload",
         help="Maximum recommended file size: 10 MB",
+        label_visibility="collapsed",
     )
 
     if new_customer_file is not None:
@@ -2311,6 +2768,13 @@ with tab3:
                 )
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
+                st.markdown('<p class="fen-section-title">Step 2 — Review &amp; Download Results</p>', unsafe_allow_html=True)
+                st.markdown("""
+Review the matches above. Accounts with **"No match found"** are new accounts that do not yet exist in
+Salesforce. Download the CSV, identify the unmatched rows, and take them to **Step 3** (Bulk Enrichment below)
+to enrich and prepare them for import.
+""")
+
                 export_df = results_df.copy()
                 for col in ["Confidence Score (%)", "Secondary Confidence (%)"]:
                     export_df[col] = export_df[col].replace(NO_VALUE_PLACEHOLDER, "")
@@ -2331,29 +2795,37 @@ with tab3:
     else:
         st.markdown("""
         <div class="placeholder-box">
-            <h3>Account Matching</h3>
+            <h3>Step 1 — Account Matching</h3>
             <p>Upload a New Customer file above to begin.<br>
             Ensure the Salesforce Accounts CSV is also loaded in the sidebar.</p>
         </div>
         """, unsafe_allow_html=True)
 
-    # ── BULK CUSTOMER ENRICHMENT ──────────────────────────────────────────────
+    # ── BULK CUSTOMER ENRICHMENT (Step 3) ─────────────────────────────────────
     st.divider()
-    st.markdown('<p class="fen-section-title">Bulk Customer Enrichment</p>', unsafe_allow_html=True)
+    st.markdown('<p class="fen-section-title">Step 3 — Bulk Customer Enrichment</p>', unsafe_allow_html=True)
     st.markdown(
         """
-        Upload a CSV containing **Account Name** and **Country** columns to generate
-        the same data points as the **Customer Attributes** tab for multiple customers
-        at once. The tool uses the identical enrichment logic — LLM web research,
-        segment resolution, and Account Category lookup — for every row.
+        Take the **unmatched accounts** from Step 1 (those with "No match found") and upload them here.
+        The tool runs the same AI enrichment logic as **Single Account Enrichment** — LLM web research,
+        segment resolution, and Account Category matrix lookup — for every row simultaneously.
+        Download the enriched CSV and import directly into Salesforce to create the new records.
         """
     )
+
+    st.markdown("""
+<div class="dropzone-container">
+  <div class="dropzone-label">📂 Upload CSV of Unmatched Accounts</div>
+  <div class="dropzone-hint">Drag &amp; drop your CSV file here, or click Browse to select — must contain <strong>Account Name</strong> and <strong>Country</strong> columns.</div>
+</div>
+""", unsafe_allow_html=True)
 
     bulk_enrich_file = st.file_uploader(
         "Upload CSV (Account Name + Country)",
         type=["csv"],
         key="bulk_enrich_upload",
         help="Must contain at least Account Name and Country columns. Maximum recommended size: 10 MB.",
+        label_visibility="collapsed",
     )
 
     if bulk_enrich_file is not None:
@@ -2497,7 +2969,7 @@ with tab3:
                             "Business Segment":          _b_research.get('business_segment', ''),
                             "Market Segment":            _b_research.get('market_segment', ''),
                             "Customer Segment":          _b_segmentation.get('customer_segment', ''),
-                            "Account Category":          _b_segmentation.get('account_category', ''),
+                            "Account Category":          format_account_category(_b_segmentation.get('account_category', '')),
                             "Secondary Account Owner":   _b_segmentation.get('secondary_account_owner', ''),
                             "Annual Revenue":             _b_research.get('annual_revenue_eur', ''),
                             "Employees":                 _b_research.get('employees', ''),
@@ -2526,142 +2998,224 @@ with tab3:
                     )
 
 # ===============================================
-# TAB 4 — ICP ANALYSIS (placeholder)
+# TAB 3 — LEAD MATCHING (placeholder)
 # ===============================================
-with tab4:
+with tab3:
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Lead Matching</span></div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="placeholder-box">
-        <h3>ICP Analysis</h3>
+        <h3>Lead Matching</h3>
         <p>This module is coming soon.<br>
-        It will score accounts against Fenergo's Ideal Customer Profile,<br>
-        providing fit ratings and prioritisation recommendations for the sales team.</p>
+        It will automatically match enriched accounts against open leads in Salesforce,<br>
+        surfacing potential overlaps and routing recommendations.</p>
     </div>
     """, unsafe_allow_html=True)
 
 # ===============================================
-# TAB 5 — CUSTOMER SEGMENT LOGIC
+# TAB 4 — CUSTOMER SEGMENT LOGIC (visual flowchart)
 # ===============================================
-with tab5:
+with tab4:
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Customer Segment Logic</span></div>', unsafe_allow_html=True)
     st.markdown('<p class="fen-section-title">Customer Segment Logic</p>', unsafe_allow_html=True)
     st.markdown("""
 This tab explains how the **Customer Segment** (Enterprise / Mid-Market / Scale-up) is derived for each account.
 The classification is based on the account's **Market Segment** combined with key financial metrics.
 """)
 
-    # Key rules callout
-    st.info("""
-**Key Rules:**
-- 🏆 **"Highest tier wins"** — if *any single metric* reaches the Enterprise threshold, the result is **Enterprise**, regardless of other metrics.
-- ❓ **All metrics unknown** — if AUM, Revenue, and Employees are all unavailable, the account defaults to **Scale-up**.
-- 🏦 **Full-Service Banks** — classification is special: the account must have **G-SIB or D-SIB designation** to be classified as Enterprise. Without it, the Banks thresholds apply instead.
-- 📊 **Metrics evaluated independently** — each metric (AUM, Revenue, Employees) is assessed on its own; any single Enterprise-level metric triggers Enterprise.
-""")
+    # Visual flowchart diagram
+    st.markdown("""
+<div class="fc-outer">
+  <div class="fc-rule-banner">
+    ⭐ &nbsp;HIGHEST TIER WINS &nbsp;—&nbsp; any single metric reaching the Enterprise threshold classifies the account as Enterprise, regardless of other metrics.
+    &nbsp;&nbsp;|&nbsp;&nbsp; ❓ All metrics unknown → defaults to <strong>Scale-up</strong>
+  </div>
 
-    # Segmentation threshold data for the table
-    _seg_data = [
-        {
-            "Market Segment": "Banks",
-            "Metric": "AUM (Assets)",
-            "Scale-up": "< €10bn",
-            "Mid-Market": "€10bn – €200bn",
-            "Enterprise": "> €200bn",
-        },
-        {
-            "Market Segment": "Banks",
-            "Metric": "Annual Revenue",
-            "Scale-up": "< €2bn",
-            "Mid-Market": "€2bn – €10bn",
-            "Enterprise": "> €10bn",
-        },
-        {
-            "Market Segment": "Banks",
-            "Metric": "Employees (FTE)",
-            "Scale-up": "< 1,000",
-            "Mid-Market": "1,000 – 5,000",
-            "Enterprise": "> 5,000",
-        },
-        {
-            "Market Segment": "Asset Mgmt., Servicing & Insurance",
-            "Metric": "AUM (Assets)",
-            "Scale-up": "< €10bn",
-            "Mid-Market": "€10bn – €100bn",
-            "Enterprise": "> €100bn",
-        },
-        {
-            "Market Segment": "Asset Mgmt., Servicing & Insurance",
-            "Metric": "Annual Revenue",
-            "Scale-up": "< €2bn",
-            "Mid-Market": "€2bn – €10bn",
-            "Enterprise": "> €10bn",
-        },
-        {
-            "Market Segment": "Asset Mgmt., Servicing & Insurance",
-            "Metric": "Employees (FTE)",
-            "Scale-up": "< 150",
-            "Mid-Market": "150 – 1,000",
-            "Enterprise": "> 1,000",
-        },
-        {
-            "Market Segment": "Corporates",
-            "Metric": "Annual Revenue",
-            "Scale-up": "< €2bn",
-            "Mid-Market": "€2bn – €10bn",
-            "Enterprise": "> €10bn",
-        },
-        {
-            "Market Segment": "Corporates",
-            "Metric": "Employees (FTE)",
-            "Scale-up": "< 1,000",
-            "Mid-Market": "1,000 – 5,000",
-            "Enterprise": "> 5,000",
-        },
-        {
-            "Market Segment": "Fintech",
-            "Metric": "Annual Revenue",
-            "Scale-up": "< €500m",
-            "Mid-Market": "€500m – €10bn",
-            "Enterprise": "> €10bn",
-        },
-        {
-            "Market Segment": "Fintech",
-            "Metric": "Employees (FTE)",
-            "Scale-up": "< 250",
-            "Mid-Market": "250 – 1,000",
-            "Enterprise": "> 1,000",
-        },
-        {
-            "Market Segment": "Other / Default",
-            "Metric": "Annual Revenue",
-            "Scale-up": "< €2bn",
-            "Mid-Market": "€2bn – €10bn",
-            "Enterprise": "> €10bn",
-        },
-        {
-            "Market Segment": "Other / Default",
-            "Metric": "Employees (FTE)",
-            "Scale-up": "< 1,000",
-            "Mid-Market": "1,000 – 5,000",
-            "Enterprise": "> 5,000",
-        },
-    ]
+  <div class="fc-segments-grid">
 
-    _seg_df = pd.DataFrame(_seg_data)
+    <!-- Banks -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">🏦 Banks</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">AUM (Assets)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €200bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €200bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Annual Revenue</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Employees (FTE)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+        </div>
+      </div>
+    </div>
 
-    def _colour_tier(val):
-        if val and ">" in str(val):
-            return "background-color: #d4edda; color: #155724; font-weight: 600;"
-        if val and "–" in str(val):
-            return "background-color: #fff3cd; color: #856404; font-weight: 600;"
-        if val and "<" in str(val):
-            return "background-color: #f8d7da; color: #721c24; font-weight: 600;"
-        return ""
+    <!-- Asset Mgmt -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">📈 Asset Mgmt., Servicing &amp; Insurance</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">AUM (Assets)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €100bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €100bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Annual Revenue</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Employees (FTE)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 150 – 1,000</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 150</div>
+        </div>
+      </div>
+    </div>
 
-    _styled_seg = (
-        _seg_df.style
-        .map(_colour_tier, subset=["Scale-up", "Mid-Market", "Enterprise"])
-        .set_properties(**{"text-align": "left"})
-    )
-    st.dataframe(_styled_seg, use_container_width=True, hide_index=True)
+    <!-- Corporates -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">🏭 Corporates</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">AUM (Assets)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-na">N/A — not assessed for Corporates</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Annual Revenue</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Employees (FTE)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fintech -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">💳 Fintech</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">AUM (Assets)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-na">N/A — not assessed for Fintech</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Annual Revenue</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €500m – €10bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €500m</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Employees (FTE)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 250 – 1,000</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 250</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full-Service Banks -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">🌐 Full-Service Banks</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">G-SIB designation</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› Automatic (G-SIB list match)</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">D-SIB designation</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› With regulator verification</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Neither G-SIB nor D-SIB</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-na">Falls back to Banks thresholds ↗</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Other / Default -->
+    <div class="fc-segment-card">
+      <div class="fc-seg-header">📦 Other / Default</div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">AUM (Assets)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-na">N/A — not assessed</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Annual Revenue</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+        </div>
+      </div>
+      <div class="fc-metric-group">
+        <div class="fc-metric-label">Employees (FTE)</div>
+        <div class="fc-tiers">
+          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end fc-segments-grid -->
+
+  <div class="fc-legend">
+    <div class="fc-legend-item">
+      <div class="fc-legend-dot" style="background:#d4edda; border:1px solid #155724;"></div>
+      <span style="color:#155724; font-weight:600;">Enterprise</span>
+    </div>
+    <div class="fc-legend-item">
+      <div class="fc-legend-dot" style="background:#fff3cd; border:1px solid #856404;"></div>
+      <span style="color:#856404; font-weight:600;">Mid-Market</span>
+    </div>
+    <div class="fc-legend-item">
+      <div class="fc-legend-dot" style="background:#f8d7da; border:1px solid #721c24;"></div>
+      <span style="color:#721c24; font-weight:600;">Scale-up</span>
+    </div>
+    <div class="fc-legend-item">
+      <div class="fc-legend-dot" style="background:#f3f3f3; border:1px solid #ccc;"></div>
+      <span style="color:#706e6b; font-weight:600;">Not applicable</span>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### 🏦 Full-Service Banks — Special Classification Logic")
@@ -2688,9 +3242,10 @@ Full-Service Banks follow a distinct classification path:
 """)
 
 # ===============================================
-# TAB 6 — FENERGO SEGMENTATION
+# TAB 5 — FENERGO SEGMENTATION (visual tree)
 # ===============================================
-with tab6:
+with tab5:
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Fenergo Segmentation</span></div>', unsafe_allow_html=True)
     st.markdown('<p class="fen-section-title">Fenergo Segmentation Hierarchy</p>', unsafe_allow_html=True)
     st.markdown("""
 This tab shows the full **three-level segmentation hierarchy** used by Fenergo.
@@ -2706,32 +3261,32 @@ The Detailed Business Segment drives the **Customer Segment**, **Account Categor
     for (detailed, business, market) in SEGMENT_HIERARCHY:
         _hier_dict.setdefault(market, {}).setdefault(business, []).append(detailed)
 
-    # Display each Market Segment as an expandable section
-    for _market_seg, _business_segs in _hier_dict.items():
-        with st.expander(f"🏛️ **{_market_seg}**", expanded=False):
-            for _biz_seg, _detailed_segs in _business_segs.items():
-                st.markdown(f"**📂 {_biz_seg}**")
-                _ds_items = "  \n".join(f"&nbsp;&nbsp;&nbsp;&nbsp;• {ds}" for ds in _detailed_segs)
-                st.markdown(_ds_items, unsafe_allow_html=True)
-            # Special note for Full-Service Banks
-            if _market_seg == "Full-Service Banks":
-                st.info("""
-**Full-Service Banks — classification logic:**
-
-Accounts in this segment require a **G-SIB or D-SIB designation** to be classified as Enterprise.
-
-- **G-SIBs** (Global Systemically Important Banks) are automatically classified as Enterprise based on the GSIB_LIST maintained in the code. This list includes major global banks (JPMorgan Chase, HSBC, Deutsche Bank, BNP Paribas, etc.).
-- **D-SIBs** (Domestic Systemically Important Banks) are matched against a country-specific DSIB_LIST. A verification warning is shown — always confirm with the local regulator, as designations can change.
-- Banks that are **neither G-SIB nor D-SIB** fall back to the standard **Banks** segment thresholds (AUM / Revenue / Employees).
-""")
-
-    st.markdown("---")
-
-    # Full hierarchy table view
-    st.markdown("### 📋 Complete Hierarchy Table")
-    _hier_df = pd.DataFrame(SEGMENT_HIERARCHY, columns=["Detailed Business Segment", "Business Segment", "Market Segment"])
-    _hier_df = _hier_df[["Market Segment", "Business Segment", "Detailed Business Segment"]]
-    st.dataframe(_hier_df, use_container_width=True, hide_index=True)
+    # Visual tree diagram
+    _tree_html_parts = ['<div class="seg-tree-outer">']
+    for _ms, _bs_dict in _hier_dict.items():
+        _tree_html_parts.append(f'<div class="seg-market-section">')
+        _tree_html_parts.append(f'<div class="seg-market-label">🏛️ {html_escape(_ms)}</div>')
+        _tree_html_parts.append('<div class="seg-business-row">')
+        for _bs, _ds_list in _bs_dict.items():
+            _tree_html_parts.append('<div class="seg-business-card">')
+            _tree_html_parts.append(f'<div class="seg-business-header">📂 {html_escape(_bs)}</div>')
+            _tree_html_parts.append('<div class="seg-detailed-list">')
+            for _ds in _ds_list:
+                _tree_html_parts.append(f'<div class="seg-detailed-item">• {html_escape(_ds)}</div>')
+            _tree_html_parts.append('</div>')  # seg-detailed-list
+            _tree_html_parts.append('</div>')  # seg-business-card
+        _tree_html_parts.append('</div>')  # seg-business-row
+        # Special note for Full-Service Banks
+        if _ms == "Full-Service Banks":
+            _tree_html_parts.append(
+                '<div style="margin:8px 0 0 20px; padding:10px 14px; background:#f0f9f8; border-left:3px solid #21CFB2; border-radius:0 6px 6px 0; font-size:0.81rem; color:#002E33;">'
+                '<strong>⚠️ Special logic:</strong> Requires G-SIB or D-SIB designation for Enterprise. '
+                'Without it, standard Banks thresholds apply.'
+                '</div>'
+            )
+        _tree_html_parts.append('</div>')  # seg-market-section
+    _tree_html_parts.append('</div>')  # seg-tree-outer
+    st.markdown("".join(_tree_html_parts), unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### 📝 Notes")
@@ -2742,3 +3297,283 @@ Accounts in this segment require a **G-SIB or D-SIB designation** to be classifi
 - These three levels are used together to determine the **Account Category** (via the account category matrix) and the **Secondary Account Owner**.
 - The G-SIB and D-SIB lists (`GSIB_LIST` and `DSIB_LIST`) are maintained in the application code and should be reviewed periodically to ensure accuracy.
 """)
+
+# ===============================================
+# TAB 6 — FIELD POPULATION LOGIC
+# ===============================================
+with tab6:
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Field Population Logic</span></div>', unsafe_allow_html=True)
+    st.markdown('<p class="fen-section-title">Field Population Logic</p>', unsafe_allow_html=True)
+    st.markdown("""
+This tab provides a detailed breakdown of **how each enriched field is populated** — from simple user
+input through to multi-step AI web research and matrix lookups. It illustrates the depth and
+sophistication of the enrichment pipeline.
+""")
+
+    st.info("""
+**Data source legend:**
+&nbsp; 👤 **User Input** — provided directly by the user
+&nbsp; 🌐 **Live Web Search** — AI searches the web in real time
+&nbsp; 🤖 **AI Reasoning** — AI derives/classifies from research
+&nbsp; 📊 **Matrix / Rules Engine** — deterministic lookup or rules
+&nbsp; 🔗 **Salesforce Cross-ref** — matched against your SF account list
+""")
+
+    st.markdown("""
+<div class="fpl-section-header">📋 Core Account Identification</div>
+<div class="fpl-grid">
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🏢 Account Name</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-user">👤 User Input</span>
+    </div>
+    <div class="fpl-description">
+      Provided directly by the user as the primary identifier for the account.
+      Used as the starting point for all downstream research and matching.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">📜 Legal Name</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+    </div>
+    <div class="fpl-description">
+      AI (OpenAI gpt-4.1 with live web search) researches the company's full registered legal name.
+      Sources checked: company registries (Companies House, SEC EDGAR), regulatory filings,
+      Bloomberg, official corporate websites and annual reports.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🌍 Country</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-user">👤 User Input</span>
+    </div>
+    <div class="fpl-description">
+      The country of the account's headquarters is selected by the user from a
+      dropdown of 60+ countries. Used as the input to the Account Category matrix lookup
+      and as a contextual signal for all AI research.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🗺️ Region</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-matrix">📊 Country Mapping Table</span>
+    </div>
+    <div class="fpl-description">
+      Auto-derived from Country using a 60+ country mapping table (EMEA / APAC / AMER).
+      No user input required — the region is determined instantly from the selected country.
+      Also drives the Secondary Account Owner assignment rules.
+    </div>
+  </div>
+
+</div>
+
+<div class="fpl-section-header">🏷️ Industry Classification</div>
+<div class="fpl-grid">
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🔍 Detailed Business Segment</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Classification</span>
+    </div>
+    <div class="fpl-description">
+      AI classifies the company into exactly <strong>one of 38 Detailed Business Segments</strong>
+      using live web research. The AI searches company websites, news, regulatory filings and
+      financial databases to understand the company's core business activities and select the
+      most appropriate segment.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">📂 Business Segment</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
+    </div>
+    <div class="fpl-description">
+      Auto-derived from the Detailed Business Segment via a 3-level segment hierarchy table.
+      No AI inference required — the Business Segment is a deterministic roll-up from the
+      Detailed Segment (e.g. "Asset Management" → "Asset &amp; Wealth Mgmt.").
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🏛️ Market Segment</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
+    </div>
+    <div class="fpl-description">
+      Auto-derived from the Detailed Business Segment via the same 3-level hierarchy.
+      The Market Segment is the top-level grouping (Banks / Asset Mgmt. / Corporates / Fintech /
+      Full-Service Banks / Other) and drives the Customer Segment threshold logic.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">📝 Industry Classification Rationale</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-ai">🤖 AI Explanation</span>
+    </div>
+    <div class="fpl-description">
+      AI generates a 1–2 sentence explanation of <em>why</em> the chosen Detailed Business Segment
+      was selected. This provides transparency and allows users to verify or override the
+      AI's classification reasoning.
+    </div>
+  </div>
+
+</div>
+
+<div class="fpl-section-header">💹 Customer Segmentation</div>
+<div class="fpl-grid">
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">📊 Customer Segment</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
+      <span class="fpl-source-badge badge-web">🌐 Live Web Data</span>
+    </div>
+    <div class="fpl-description">
+      A rules engine evaluates AUM, Annual Revenue, and Employees against
+      market-segment-specific thresholds. <strong>"Highest tier wins"</strong> — any single metric
+      reaching Enterprise level classifies the account as Enterprise.
+      G-SIB/D-SIB banks get special handling: they are automatically Enterprise
+      without relying on financial metrics.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🗂️ Account Category</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-matrix">📊 Excel Matrix Lookup</span>
+    </div>
+    <div class="fpl-description">
+      A matrix lookup using <strong>Country × Customer Segment × Business Segment</strong>
+      against an Excel-based matrix covering 60+ countries. Returns Category 1, 2, or 3,
+      which drives commercial prioritisation. No AI involved — this is a pure
+      deterministic lookup against the approved business rules matrix.
+    </div>
+  </div>
+
+</div>
+
+<div class="fpl-section-header">🔗 Corporate Hierarchy &amp; Ownership</div>
+<div class="fpl-grid">
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🏢 Ultimate Parent</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+    </div>
+    <div class="fpl-description">
+      AI researches the full corporate ownership chain to identify the top-level holding entity.
+      Sources: annual reports, SEC filings, Companies House, regulatory databases, Bloomberg.
+      For publicly traded companies that are their own ultimate parent, the AI correctly
+      returns the listed entity rather than null.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">🔗 Parent Account &amp; Reporting Group</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-sf">🔗 Salesforce Cross-ref</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Suggestion (fallback)</span>
+    </div>
+    <div class="fpl-description">
+      Cross-referenced against the uploaded Salesforce account list using
+      <strong>fuzzy matching (rapidfuzz)</strong> with normalisation of legal suffixes
+      (Ltd, Inc, plc, GmbH, etc.). The Reporting Group is taken from the SF record whose
+      Ultimate Parent matches the AI-identified ultimate parent. If no SF match is found,
+      the AI suggests a friendly short name (e.g. "Barclays" for "Barclays Services Ltd").
+    </div>
+  </div>
+
+</div>
+
+<div class="fpl-section-header">👥 Account Ownership &amp; Financial Metrics</div>
+<div class="fpl-grid">
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">👤 Secondary Account Owner</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
+    </div>
+    <div class="fpl-description">
+      Determined by a rules engine using <strong>Region + Account Category</strong>.
+      EMEA and UK/Ireland accounts are assigned to Elaine Zhang. APAC accounts to Vernis Tan.
+      AMER accounts: Category 1 → Elaine Zhang; other categories rotate monthly
+      between Joseph Cawley and Gabriel Simpatico (odd months vs even months).
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">💰 Annual Revenue</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+    </div>
+    <div class="fpl-description">
+      AI web research prioritises the company's own investor relations pages and annual reports,
+      then regulatory filings, then major financial data providers (Bloomberg, Reuters, S&amp;P Global).
+      The most recent year available is always used (2024/2025 where possible).
+      Source URL is captured and displayed for verification.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">👥 Employees</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+    </div>
+    <div class="fpl-description">
+      Full-time equivalent (FTE) headcount sourced from company reports, LinkedIn,
+      regulatory filings, or financial databases. AI cross-references multiple sources
+      and uses the most authoritative, most recent figure. Source URL is captured.
+    </div>
+  </div>
+
+  <div class="fpl-card">
+    <div class="fpl-field-name">📈 AUM (Assets Under Management)</div>
+    <div class="fpl-badges">
+      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+    </div>
+    <div class="fpl-description">
+      Assets Under Management — relevant for banks, asset managers, hedge funds, pension funds,
+      insurance companies and similar. For companies where AUM is not applicable (e.g. Fintechs,
+      Corporates), the AI correctly returns "N/A". Source URL is captured for validation.
+    </div>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.info("""
+**ℹ️ Data Freshness:** The system always attempts live web search via OpenAI gpt-4.1 (Responses API with web_search tool).
+If the live search fails, it retries up to 2 times before falling back to the model's training data.
+When training data is used, a prominent warning is shown and figures are annotated as potentially outdated.
+""")
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="fen-footer">
+  <div>
+    <span class="fen-footer-brand">fenergo</span>
+    &nbsp;Account Intelligence Platform
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    Built for Fenergo Sales &amp; Account Management
+  </div>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <span>Powered by OpenAI gpt-4.1 + rapidfuzz</span>
+    <span class="fen-footer-version">v{APP_VERSION}</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
