@@ -494,7 +494,7 @@ def load_account_category_matrix():
                     )] = str(value).strip()
         if lookup:
             return lookup, None
-        _primary_err = "Multi-header read produced no entries"
+        _primary_err = "Multi-header read succeeded but matrix contains no valid entries"
     except FileNotFoundError:
         return {}, "account_category_matrix.xlsx not found in repo root"
     except Exception as e:
@@ -521,7 +521,7 @@ def load_account_category_matrix():
                         break
         if lookup2:
             return lookup2, None
-        return {}, f"Matrix loaded but no entries found (primary: {_primary_err}; fallback columns: {df2.columns.tolist()[:5]})"
+        return {}, f"Matrix loaded but no entries found. Primary error: {_primary_err}. Fallback attempted with {len(df2.columns)} columns."
     except FileNotFoundError:
         return {}, "account_category_matrix.xlsx not found in repo root"
     except Exception as e2:
@@ -680,7 +680,7 @@ def compute_match_score(new_norm, val_norm):
 
     # Word-level substring boost: if all words of the shorter name appear as whole words in
     # the longer name, boost to at least 75.  This handles abbreviations like "UBS" → "UBS IB"
-    # or "UBS LUX" without relying solely on fuzzy ratios that penalise length differences.
+    # or "UBS LUX" without relying solely on fuzzy ratios that penalize length differences.
     _new_words = set(new_norm.split()) if new_norm else set()
     _val_words = set(val_norm.split()) if val_norm else set()
     _shorter_words = _new_words if len(new_norm) <= len(val_norm) else _val_words
@@ -1821,7 +1821,7 @@ with tab1:
                 _parent_account_disp = _research.get('_parent_account', '')
                 _reporting_group_disp = _research.get('_reporting_group', '')
                 _rg_source = _research.get('_reporting_group_source', '')
-                _rg_note = "AI-suggested friendly name (not found in SF upload)" if _rg_source == 'ai' else None
+                _rg_note = "AI-generated friendly name (no matching entry in Salesforce)" if _rg_source == 'ai' else None
                 _s1_left = [
                     _sf_field("Account Name",            _account_name),
                     _sf_field("Account Type",            _account_type),
