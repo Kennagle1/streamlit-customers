@@ -28,6 +28,8 @@ MAX_RESPONSES_API_RETRIES = 2          # Retry attempts for Responses API before
 _CAT_REGEX_12 = r'\b(cat|category)\s*[12]\b'   # matches "Cat 1", "Cat 2", "Category 1", etc.
 _CAT_REGEX_3  = r'\b(cat|category)\s*3\b'       # matches "Cat 3", "Category 3"
 _CAT_SECONDARY_OWNER_REGEX = r'\b(cat|category)\s*1\b'  # for secondary owner assignment
+# Common email TLDs stripped when extracting company name from email domain
+_EMAIL_TLD_PATTERN = r'\.(com\.au|co\.uk|co\.nz|com|org|net|io|co|gov|edu|biz|info|eu|de|fr|ie|uk|au|us|ca|sg|hk|jp|cn|in|br|za|ae)$'
 
 # -----------------------------------------------
 # OPENAI CLIENT
@@ -2365,8 +2367,11 @@ Use web_search to find current information. Do NOT rely on training data alone."
 # ADMIN / PERMISSIONS SYSTEM
 # -----------------------------------------------
 _ADMIN_CONFIG_FILE = "admin_config.json"
+# Initial admin is set via STREAMLIT_ADMIN_EMAIL secret or defaults to "kennagle1".
+# Once admin_config.json exists on disk the default is never re-applied.
+_INITIAL_ADMIN = st.secrets.get("ADMIN_EMAIL", "kennagle1") if hasattr(st, "secrets") else "kennagle1"
 _DEFAULT_ADMIN_CONFIG = {
-    "admins": ["kennagle1"],
+    "admins": [_INITIAL_ADMIN],
     "users": {
         "david.neale@fenergo.com": {
             "name": "David Neale",
@@ -2379,7 +2384,7 @@ _DEFAULT_ADMIN_CONFIG = {
                 "reference": True,
                 "admin": False,
             },
-            "added_by": "kennagle1",
+            "added_by": _INITIAL_ADMIN,
             "added_date": "2025-01-01",
         }
     },
@@ -3592,8 +3597,8 @@ with tab3:
                         if not email_str or '@' not in str(email_str):
                             return ""
                         domain = str(email_str).split('@', 1)[1].lower().strip()
-                        # Remove known TLDs: .com, .co.uk, .com.au, .org, .net, .io, .co, etc.
-                        domain = re.sub(r'\.(com\.au|co\.uk|co\.nz|com|org|net|io|co|gov|edu|biz|info|eu|de|fr|ie|uk|au|us|ca|sg|hk|jp|cn|in|br|za|ae)$', '', domain)
+                        # Remove known TLDs using the shared _EMAIL_TLD_PATTERN constant
+                        domain = re.sub(_EMAIL_TLD_PATTERN, '', domain)
                         # Remove remaining dots (e.g. subdomain leftovers)
                         domain = domain.replace('.', '')
                         return domain.upper()
@@ -4571,7 +4576,10 @@ with tab5:
                     st.success(f"✅ User **{_ne}** added successfully.")
 
                     # Show notification template (no live SMTP configured)
-                    _app_url = "https://your-app-url.streamlit.app"  # update when deployed
+                    _app_url = (
+                        st.secrets.get("APP_URL", "https://your-app-url.streamlit.app")
+                        if hasattr(st, "secrets") else "https://your-app-url.streamlit.app"
+                    )
                     st.info(
                         f"📧 **Email notification to send to {_ne}:**\n\n"
                         f"Subject: You've been added to Fenergo Account Intelligence\n\n"
