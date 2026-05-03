@@ -1131,19 +1131,28 @@ def load_icp_characteristics():
     """
     try:
         _df = pd.read_excel("ICP Characteristics.xlsx")
+        # Normalize column names: strip extra whitespace to handle double-space variants
+        _df.columns = [str(c).strip() for c in _df.columns]
+        # Build column lookup (normalised → actual column name)
+        _col_lookup = {str(c).strip().lower(): c for c in _df.columns}
+
+        def _get_col(name):
+            """Case/space-insensitive column lookup."""
+            return _col_lookup.get(name.strip().lower(), name)
+
         _rows = []
         for _, _row in _df.iterrows():
             _rows.append({
-                "id":               str(_row.get("#", "")).strip(),
-                "characteristic":   str(_row.get("ICP Characteristic", "")).strip(),
-                "what_it_measures": str(_row.get("What it Measures", "")).strip(),
-                "weight":           _row.get("Weight (%)", 0),
-                "evidence":         str(_row.get("Evidence / Data Support", "")).strip(),
-                "score_1":          str(_row.get("1. Absent", "")).strip(),
-                "score_2":          str(_row.get("2. Emerging", "")).strip(),
-                "score_3":          str(_row.get("3.  Present", _row.get("3. Present", ""))).strip(),
-                "score_4":          str(_row.get("4. Strong", "")).strip(),
-                "score_5":          str(_row.get("5.  Dominant", _row.get("5. Dominant", ""))).strip(),
+                "id":               str(_row.get(_get_col("#"), "")).strip(),
+                "characteristic":   str(_row.get(_get_col("ICP Characteristic"), "")).strip(),
+                "what_it_measures": str(_row.get(_get_col("What it Measures"), "")).strip(),
+                "weight":           _row.get(_get_col("Weight (%)"), 0),
+                "evidence":         str(_row.get(_get_col("Evidence / Data Support"), "")).strip(),
+                "score_1":          str(_row.get(_get_col("1. Absent"), "")).strip(),
+                "score_2":          str(_row.get(_get_col("2. Emerging"), "")).strip(),
+                "score_3":          str(_row.get(_get_col("3. Present"), "")).strip(),
+                "score_4":          str(_row.get(_get_col("4. Strong"), "")).strip(),
+                "score_5":          str(_row.get(_get_col("5. Dominant"), "")).strip(),
             })
         return _rows, None
     except FileNotFoundError:
@@ -2263,8 +2272,10 @@ Use web_search to find current information. Do NOT rely on training data alone."
             text_content = text_content.strip()
             if text_content.startswith("```"):
                 lines = text_content.split("\n")
-                if len(lines) >= 3:
+                # Need at least: opening fence + content + closing fence (3 lines)
+                if len(lines) >= 3 and lines[-1].strip() in ("```", "```json"):
                     text_content = "\n".join(lines[1:-1]).strip()
+            # Remove citation annotation markers added by the Responses API (e.g. 【4:0†source】)
             text_content = re.sub(r'【[^】]*】', '', text_content)
             if text_content and not text_content.startswith("{"):
                 first_brace = text_content.find("{")
