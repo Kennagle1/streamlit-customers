@@ -22,7 +22,7 @@ st.set_page_config(page_title="Fenergo | Account Intelligence", layout="wide", p
 # -----------------------------------------------
 # APPLICATION CONSTANTS
 # -----------------------------------------------
-APP_VERSION = "2.1"
+APP_VERSION = "3.0"
 MAX_RESPONSES_API_RETRIES = 2          # Retry attempts for Responses API before fallback
 _CAT_REGEX_12 = r'\b(cat|category)\s*[12]\b'   # matches "Cat 1", "Cat 2", "Category 1", etc.
 _CAT_REGEX_3  = r'\b(cat|category)\s*3\b'       # matches "Cat 3", "Category 3"
@@ -560,58 +560,150 @@ st.markdown("""
     /* ── Fenergo Segmentation visual tree ────────────────────────── */
     .seg-tree-outer {
         background: white;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid #dde8e8;
-        padding: 20px;
-        margin-bottom: 20px;
+        padding: 10px;
+        margin-bottom: 10px;
         overflow-x: auto;
     }
     .seg-market-section {
-        margin-bottom: 22px;
+        margin-bottom: 8px;
     }
     .seg-market-label {
         background: linear-gradient(90deg, #002E33 0%, #004a52 100%);
         color: #21CFB2;
         font-weight: 700;
-        font-size: 0.88rem;
-        padding: 8px 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        letter-spacing: 0.3px;
+        font-size: 0.78rem;
+        padding: 4px 10px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        letter-spacing: 0.2px;
     }
     .seg-business-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
-        margin-left: 20px;
+        gap: 6px;
+        margin-left: 12px;
     }
     .seg-business-card {
         background: #f0f9f8;
         border: 1px solid #21CFB2;
-        border-radius: 8px;
+        border-radius: 6px;
         overflow: hidden;
-        min-width: 180px;
-        max-width: 240px;
+        min-width: 140px;
+        max-width: 200px;
         flex: 1;
     }
     .seg-business-header {
         background: #21CFB2;
         color: #002E33;
         font-weight: 700;
-        font-size: 0.8rem;
-        padding: 6px 12px;
+        font-size: 0.72rem;
+        padding: 3px 8px;
     }
     .seg-detailed-list {
-        padding: 8px 12px;
+        padding: 3px 8px;
     }
     .seg-detailed-item {
-        font-size: 0.78rem;
+        font-size: 0.7rem;
         color: #002E33;
-        padding: 2px 0;
-        border-bottom: 1px solid rgba(33,207,178,0.15);
-        line-height: 1.4;
+        padding: 1px 0;
+        border-bottom: 1px solid rgba(33,207,178,0.12);
+        line-height: 1.3;
     }
     .seg-detailed-item:last-child { border-bottom: none; }
+
+    /* ── ICP Characteristics ──────────────────────────────────────── */
+    .icp-card {
+        background: white;
+        border-left: 4px solid #21CFB2;
+        border-radius: 8px;
+        padding: 14px 18px;
+        margin-bottom: 14px;
+        box-shadow: 0 1px 4px rgba(0,46,51,0.08);
+    }
+    .icp-card-title {
+        color: #002E33;
+        font-weight: 700;
+        font-size: 0.9rem;
+        margin-bottom: 6px;
+    }
+    .icp-score-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        margin-left: 8px;
+    }
+    .icp-score-5 { background:#d4edda; color:#155724; }
+    .icp-score-4 { background:#d4edda; color:#155724; }
+    .icp-score-3 { background:#fff3cd; color:#856404; }
+    .icp-score-2 { background:#f8d7da; color:#721c24; }
+    .icp-score-1 { background:#f8d7da; color:#721c24; }
+    .icp-score-0 { background:#f3f3f3; color:#706e6b; }
+    .icp-overall {
+        background: linear-gradient(135deg, #002E33 0%, #004a52 100%);
+        color: white;
+        border-radius: 10px;
+        padding: 18px 24px;
+        margin-top: 20px;
+    }
+    .icp-overall-title {
+        color: #21CFB2;
+        font-weight: 700;
+        font-size: 1rem;
+        margin-bottom: 12px;
+    }
+    .icp-overall-score {
+        font-size: 2.4rem;
+        font-weight: 800;
+        color: #21CFB2;
+    }
+
+    /* ── Reference flow diagram ───────────────────────────────────── */
+    .flow-outer {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid #dde8e8;
+        padding: 24px;
+        margin-bottom: 20px;
+    }
+    .flow-box {
+        background: #f0f9f8;
+        border: 2px solid #21CFB2;
+        border-radius: 8px;
+        padding: 8px 14px;
+        text-align: center;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #002E33;
+        display: inline-block;
+        min-width: 120px;
+    }
+    .flow-box-centre {
+        background: #002E33;
+        border: 2px solid #21CFB2;
+        border-radius: 10px;
+        padding: 12px 20px;
+        text-align: center;
+        font-size: 0.95rem;
+        font-weight: 800;
+        color: #21CFB2;
+        display: inline-block;
+        min-width: 160px;
+    }
+    .flow-arrow {
+        color: #21CFB2;
+        font-size: 1.3rem;
+        font-weight: 700;
+    }
+    .flow-note {
+        font-size: 0.72rem;
+        color: #5a7a7a;
+        font-style: italic;
+        margin-top: 4px;
+    }
 
     /* ── Professional footer ──────────────────────────────────────── */
     .fen-footer {
@@ -687,64 +779,109 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------
-# APPROVED SEGMENTATION HIERARCHY
+# LOAD SEGMENT HIERARCHY FROM EXCEL (with fallback)
 # -----------------------------------------------
-SEGMENT_HIERARCHY = [
-    ("Alternative Asset Management",                   "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Asset Management",                               "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Hedge Funds",                                    "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Investech",                                      "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Pension Funds",                                  "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Private Banking",                                "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Real Estate",                                    "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Sovereign Wealth Funds",                         "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Wealth Management",                              "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Family Offices",                                 "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
-    ("Asset Servicing",                                "Asset Servicing",                "Asset Mgmt., Servicing & Insurance"),
-    ("Custodian",                                      "Asset Servicing",                "Asset Mgmt., Servicing & Insurance"),
-    ("Insurance",                                      "Insurance",                      "Asset Mgmt., Servicing & Insurance"),
-    ("Insurtech",                                      "Insurance",                      "Asset Mgmt., Servicing & Insurance"),
-    ("Brokerage/Broker-dealer",                        "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
-    ("Clearing House",                                 "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
-    ("Transaction & Trust Activities",                 "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
-    ("Investment / Institutional Banking",             "C&IB",                           "Banks"),
-    ("Central Banking",                                "Commercial & Business",          "Banks"),
-    ("Commercial Banking",                             "Commercial & Business",          "Banks"),
-    ("Business Banking",                               "Commercial & Business",          "Banks"),
-    ("Financial Services",                             "Commercial & Business",          "Banks"),
-    ("Community Bank",                                 "Retail",                         "Banks"),
-    ("Credit Union",                                   "Retail",                         "Banks"),
-    ("Retail Banking",                                 "Retail",                         "Banks"),
-    ("Mutual Savings Bank",                            "Retail",                         "Banks"),
-    ("Exchanges and Commodity Trading",                "Exchanges and Commodity trading","Corporates"),
-    ("Market Maker",                                   "Exchanges and Commodity trading","Corporates"),
-    ("Oil & Gas",                                      "Oil & Gas",                      "Corporates"),
-    ("Energy",                                         "Energy",                         "Corporates"),
-    ("Renewable Energy",                               "Energy",                         "Corporates"),
-    ("Banking as a Service",                           "Fintech",                        "Fintech"),
-    ("Crypto",                                         "Fintech",                        "Fintech"),
-    ("Digital Banks",                                  "Fintech",                        "Fintech"),
-    ("Embedded Finance & BNPL",                        "Fintech",                        "Fintech"),
-    ("E-money Institutions",                           "Fintech",                        "Fintech"),
-    ("Fintech",                                        "Fintech",                        "Fintech"),
-    ("Marketplaces",                                   "Fintech",                        "Fintech"),
-    ("Money Services Business",                        "Fintech",                        "Fintech"),
-    ("Neo Banks",                                      "Fintech",                        "Fintech"),
-    ("Open Banking",                                   "Fintech",                        "Fintech"),
-    ("Payments Service Provider",                      "Fintech",                        "Fintech"),
-    ("Remittance",                                     "Fintech",                        "Fintech"),
-    ("Gaming and Gambling",                            "Fintech",                        "Fintech"),
-    ("Proptech",                                       "Fintech",                        "Fintech"),
-    ("Full-Service Banks",                             "Full-Service Banks",             "Full-Service Banks"),
-    ("Precious Metals and Jewellery",                  "Other",                          "Other"),
-    ("Legal and Accounting Services",                  "Other",                          "Other"),
-    ("Other",                                          "Other",                          "Other"),
-    ("Professional Services",                          "Other",                          "Other"),
-    ("Other Corporates",                               "Other",                          "Other"),
-    ("Building Society",                               "Other",                          "Other"),
-    ("Aviation and Aerospace Component Manufacturing", "Other",                          "Other"),
-    ("High Value Goods and Luxury Items",              "Other",                          "Other"),
-]
+@st.cache_data
+def load_segment_hierarchy():
+    """Load segment hierarchy from Excel file with fallback to hardcoded data.
+
+    Priority:
+    1. Salesforce Segments 06_10_25 v2.xlsx  (columns: Detailed Business Segment, Business Segment, Market Segment)
+    2. Salesforce Segments.xlsx
+    3. Hardcoded SEGMENT_HIERARCHY_DEFAULT
+    """
+    _SEGMENT_HIERARCHY_DEFAULT = [
+        ("Alternative Asset Management",                   "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Asset Management",                               "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Hedge Funds",                                    "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Investech",                                      "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Pension Funds",                                  "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Private Banking",                                "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Real Estate",                                    "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Sovereign Wealth Funds",                         "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Wealth Management",                              "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Family Offices",                                 "Asset & Wealth Mgmt.",           "Asset Mgmt., Servicing & Insurance"),
+        ("Asset Servicing",                                "Asset Servicing",                "Asset Mgmt., Servicing & Insurance"),
+        ("Custodian",                                      "Asset Servicing",                "Asset Mgmt., Servicing & Insurance"),
+        ("Insurance",                                      "Insurance",                      "Asset Mgmt., Servicing & Insurance"),
+        ("Insurtech",                                      "Insurance",                      "Asset Mgmt., Servicing & Insurance"),
+        ("Brokerage/Broker-dealer",                        "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
+        ("Clearing House",                                 "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
+        ("Transaction & Trust Activities",                 "Transaction & Trust Activities", "Asset Mgmt., Servicing & Insurance"),
+        ("Investment / Institutional Banking",             "C&IB",                           "Banks"),
+        ("Central Banking",                                "Commercial & Business",          "Banks"),
+        ("Commercial Banking",                             "Commercial & Business",          "Banks"),
+        ("Business Banking",                               "Commercial & Business",          "Banks"),
+        ("Financial Services",                             "Commercial & Business",          "Banks"),
+        ("Community Bank",                                 "Retail",                         "Banks"),
+        ("Credit Union",                                   "Retail",                         "Banks"),
+        ("Retail Banking",                                 "Retail",                         "Banks"),
+        ("Mutual Savings Bank",                            "Retail",                         "Banks"),
+        ("Exchanges and Commodity Trading",                "Exchanges and Commodity trading","Corporates"),
+        ("Market Maker",                                   "Exchanges and Commodity trading","Corporates"),
+        ("Oil & Gas",                                      "Oil & Gas",                      "Corporates"),
+        ("Energy",                                         "Energy",                         "Corporates"),
+        ("Renewable Energy",                               "Energy",                         "Corporates"),
+        ("Banking as a Service",                           "Fintech",                        "Fintech"),
+        ("Crypto",                                         "Fintech",                        "Fintech"),
+        ("Digital Banks",                                  "Fintech",                        "Fintech"),
+        ("Embedded Finance & BNPL",                        "Fintech",                        "Fintech"),
+        ("E-money Institutions",                           "Fintech",                        "Fintech"),
+        ("Fintech",                                        "Fintech",                        "Fintech"),
+        ("Marketplaces",                                   "Fintech",                        "Fintech"),
+        ("Money Services Business",                        "Fintech",                        "Fintech"),
+        ("Neo Banks",                                      "Fintech",                        "Fintech"),
+        ("Open Banking",                                   "Fintech",                        "Fintech"),
+        ("Payments Service Provider",                      "Fintech",                        "Fintech"),
+        ("Remittance",                                     "Fintech",                        "Fintech"),
+        ("Gaming and Gambling",                            "Fintech",                        "Fintech"),
+        ("Proptech",                                       "Fintech",                        "Fintech"),
+        ("Full-Service Banks",                             "Full-Service Banks",             "Banks"),
+        ("Precious Metals and Jewellery",                  "Other",                          "Other"),
+        ("Legal and Accounting Services",                  "Other",                          "Other"),
+        ("Other",                                          "Other",                          "Other"),
+        ("Professional Services",                          "Other",                          "Other"),
+        ("Other Corporates",                               "Other",                          "Other"),
+        ("Building Society",                               "Other",                          "Other"),
+        ("Aviation and Aerospace Component Manufacturing", "Other",                          "Other"),
+        ("High Value Goods and Luxury Items",              "Other",                          "Other"),
+    ]
+
+    _col_map_options = [
+        # common column name patterns: (detailed, business, market)
+        ("Detailed Business Segment", "Business Segment", "Market Segment"),
+        ("detailed business segment", "business segment", "market segment"),
+        ("Detailed_Business_Segment", "Business_Segment", "Market_Segment"),
+    ]
+
+    for _fname in ("Salesforce Segments 06_10_25 v2.xlsx", "Salesforce Segments.xlsx"):
+        try:
+            _df = pd.read_excel(_fname)
+            _cols_lc = {c: c.strip().lower() for c in _df.columns}
+            _det_col = next((c for c, lc in _cols_lc.items() if "detailed" in lc and "segment" in lc), None)
+            _biz_col = next((c for c, lc in _cols_lc.items() if "business" in lc and "segment" in lc and "detailed" not in lc), None)
+            _mkt_col = next((c for c, lc in _cols_lc.items() if "market" in lc and "segment" in lc), None)
+            if _det_col and _biz_col and _mkt_col:
+                _hier = []
+                for _, _row in _df.iterrows():
+                    _d = str(_row[_det_col]).strip() if pd.notna(_row[_det_col]) else ""
+                    _b = str(_row[_biz_col]).strip() if pd.notna(_row[_biz_col]) else ""
+                    _m = str(_row[_mkt_col]).strip() if pd.notna(_row[_mkt_col]) else ""
+                    if _d and _b and _m:
+                        # Ensure Full-Service Banks market is "Banks"
+                        if _b.lower() == "full-service banks" or _d.lower() == "full-service banks":
+                            _m = "Banks"
+                        _hier.append((_d, _b, _m))
+                if _hier:
+                    return _hier, _fname
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    return _SEGMENT_HIERARCHY_DEFAULT, "hardcoded"
+
+SEGMENT_HIERARCHY, _seg_hierarchy_source = load_segment_hierarchy()
 
 SEGMENT_LOOKUP = {
     row[0].lower(): {"detailed": row[0], "business": row[1], "market": row[2]}
@@ -980,6 +1117,45 @@ if matrix_error:
     st.sidebar.warning(matrix_error)
 else:
     st.sidebar.success(f"✅ Matrix loaded ({len(set(k[0] for k in matrix_lookup.keys()))} countries)")
+
+# -----------------------------------------------
+# LOAD ICP CHARACTERISTICS FROM EXCEL
+# -----------------------------------------------
+@st.cache_data
+def load_icp_characteristics():
+    """Load ICP Characteristics from Excel file.
+
+    Returns a list of dicts with keys:
+      id, characteristic, what_it_measures, weight, evidence,
+      score_1, score_2, score_3, score_4, score_5
+    """
+    try:
+        _df = pd.read_excel("ICP Characteristics.xlsx")
+        _rows = []
+        for _, _row in _df.iterrows():
+            _rows.append({
+                "id":               str(_row.get("#", "")).strip(),
+                "characteristic":   str(_row.get("ICP Characteristic", "")).strip(),
+                "what_it_measures": str(_row.get("What it Measures", "")).strip(),
+                "weight":           _row.get("Weight (%)", 0),
+                "evidence":         str(_row.get("Evidence / Data Support", "")).strip(),
+                "score_1":          str(_row.get("1. Absent", "")).strip(),
+                "score_2":          str(_row.get("2. Emerging", "")).strip(),
+                "score_3":          str(_row.get("3.  Present", _row.get("3. Present", ""))).strip(),
+                "score_4":          str(_row.get("4. Strong", "")).strip(),
+                "score_5":          str(_row.get("5.  Dominant", _row.get("5. Dominant", ""))).strip(),
+            })
+        return _rows, None
+    except FileNotFoundError:
+        return [], "ICP Characteristics.xlsx not found"
+    except Exception as _e:
+        return [], str(_e)
+
+icp_characteristics, icp_load_error = load_icp_characteristics()
+if icp_load_error:
+    st.sidebar.warning(f"ICP file: {icp_load_error}")
+elif icp_characteristics:
+    st.sidebar.success(f"✅ ICP Characteristics loaded ({len(icp_characteristics)} criteria)")
 
 # Sidebar status / powered-by indicator
 st.sidebar.markdown("---")
@@ -1382,12 +1558,13 @@ def check_full_service_bank_eligibility(account_name):
 # -----------------------------------------------
 # CUSTOMER SEGMENT LOGIC
 # -----------------------------------------------
-def classify_customer_segment(market_segment, aum_bn, revenue_bn, employees, account_name=""):
+def classify_customer_segment(market_segment, aum_bn, revenue_bn, employees, account_name="", business_segment=""):
     all_unknown = aum_bn is None and revenue_bn is None and employees is None
     if all_unknown:
         return "Scale-up", "All metrics unknown — defaulting to Scale-up per business rules."
 
     seg = (market_segment or '').strip()
+    bseg = (business_segment or '').strip()
 
     def tier(e_hit, m_hit, parts):
         rationale = " | ".join(parts) if parts else "Insufficient data"
@@ -1397,7 +1574,8 @@ def classify_customer_segment(market_segment, aum_bn, revenue_bn, employees, acc
             return "Mid-Market", rationale
         return "Scale-up", rationale
 
-    if seg == "Full-Service Banks":
+    # Full-Service Banks check: triggered by business_segment OR legacy market_segment value
+    if bseg == "Full-Service Banks" or seg == "Full-Service Banks":
         eligible, classification, warning = check_full_service_bank_eligibility(account_name)
         if eligible:
             msg = f"Confirmed {classification} — Full-Service Banks classification applied."
@@ -1405,7 +1583,7 @@ def classify_customer_segment(market_segment, aum_bn, revenue_bn, employees, acc
                 msg += f" | {warning}"
             return "Enterprise", msg
         else:
-            return classify_customer_segment("Banks", aum_bn, revenue_bn, employees, account_name)
+            return classify_customer_segment("Banks", aum_bn, revenue_bn, employees, account_name, "")
 
     if seg == "Banks":
         e, m, parts = False, False, []
@@ -1864,7 +2042,7 @@ def apply_segmentation(research_data, account_name="", region="", country=""):
     revenue_bn = parse_numeric(research_data.get('annual_revenue_eur', ''))
     employees  = parse_employees(research_data.get('employees', ''))
     customer_segment, rationale = classify_customer_segment(
-        market_segment, aum_bn, revenue_bn, employees, account_name
+        market_segment, aum_bn, revenue_bn, employees, account_name, business_segment
     )
     account_category, category_note = get_account_category(
         country, business_segment, customer_segment, matrix_lookup
@@ -2018,11 +2196,129 @@ def run_fuzzy_dup_check(sf_accounts, account_name, top_n=10, min_score=60):
     return scored[:top_n]
 
 # -----------------------------------------------
+# ICP CHARACTERISTIC RESEARCH
+# -----------------------------------------------
+def research_icp_characteristic(account_name, characteristic, what_it_measures, weight, evidence, scoring_rubric):
+    """Research a single ICP characteristic for the given account using Responses API with web search.
+
+    Returns a dict with:
+      score (int 0-5), score_label (str), assessment (str), source_url (str|None),
+      search_method (str), raw_error (str|None)
+    """
+    if client is None:
+        return {
+            "score": 0, "score_label": "N/A",
+            "assessment": "OpenAI client not configured.",
+            "source_url": None, "search_method": "unavailable", "raw_error": None
+        }
+
+    _score_labels = {0: "No information found", 1: "Absent", 2: "Emerging", 3: "Present", 4: "Strong", 5: "Dominant"}
+
+    _prompt = f"""You are a financial services sales intelligence analyst evaluating whether a company is an ICP (Ideal Customer Profile) fit for Fenergo.
+
+Fenergo is a leading Client Lifecycle Management (CLM) and KYC/AML compliance platform for financial services institutions. Fenergo helps banks, asset managers, insurance companies, and fintechs automate client onboarding, regulatory compliance (KYC, AML, FATCA, MiFID II), and client data management. Key product areas: Enterprise CLM, KYC/AML, Client Onboarding Automation, Regulatory Compliance, Financial Crime Prevention, and Data Management.
+
+You are evaluating: **{account_name}**
+
+ICP Characteristic to assess: **{characteristic}**
+What it measures: {what_it_measures}
+Weight in overall ICP score: {weight}%
+
+Scoring rubric (1=Absent → 5=Dominant):
+1. Absent: {scoring_rubric.get('1', '')}
+2. Emerging: {scoring_rubric.get('2', '')}
+3. Present: {scoring_rubric.get('3', '')}
+4. Strong: {scoring_rubric.get('4', '')}
+5. Dominant: {scoring_rubric.get('5', '')}
+
+Supporting evidence context: {evidence}
+
+INSTRUCTIONS:
+1. Search the web for current, authoritative information about {account_name} relevant to this characteristic.
+2. Assess the evidence against the scoring rubric above.
+3. Assign a score from 1-5 (or 0 if no information found at all).
+4. Provide a concise 2-3 sentence assessment explaining your score.
+5. Include the URL of the most relevant source you found.
+
+Return ONLY a JSON object with these keys:
+- "score": integer 0-5 (0 = no information found)
+- "score_label": one of "No information found", "Absent", "Emerging", "Present", "Strong", "Dominant"
+- "assessment": string — 2-3 sentences explaining the score with specific evidence
+- "source_url": string URL of primary source, or null if none found
+
+Use web_search to find current information. Do NOT rely on training data alone."""
+
+    _responses_api_error = None
+    _extracted = None
+    _search_method = None
+
+    for _attempt in range(MAX_RESPONSES_API_RETRIES + 1):
+        try:
+            resp_data = client.responses.create(
+                model="gpt-4.1",
+                tools=[{"type": "web_search_preview"}],
+                input=_prompt,
+            )
+            text_content = resp_data.output_text or ""
+            text_content = text_content.strip()
+            if text_content.startswith("```"):
+                lines = text_content.split("\n")
+                if len(lines) >= 3:
+                    text_content = "\n".join(lines[1:-1]).strip()
+            text_content = re.sub(r'【[^】]*】', '', text_content)
+            if text_content and not text_content.startswith("{"):
+                first_brace = text_content.find("{")
+                last_brace = text_content.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    text_content = text_content[first_brace:last_brace + 1]
+            if not text_content:
+                raise ValueError("Empty response from Responses API")
+            _extracted = json.loads(text_content)
+            _search_method = "responses_api_web_search"
+            break
+        except Exception as _e:
+            _attempt_msg = f"[Attempt {_attempt + 1}] {type(_e).__name__}: {_e}"
+            _responses_api_error = (_responses_api_error + " || " + _attempt_msg) if _responses_api_error else _attempt_msg
+            if _attempt < MAX_RESPONSES_API_RETRIES:
+                continue
+
+    # Fallback to chat completions
+    if _extracted is None:
+        try:
+            _fallback_prompt = _prompt + "\n\nNOTE: You do NOT have internet access in this mode. Use your training knowledge only. Clearly indicate if information may be outdated. Set source_url to null."
+            response = client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[{"role": "user", "content": _fallback_prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            _extracted = json.loads(response.choices[0].message.content)
+            _search_method = "chat_completions_fallback"
+        except Exception as _fe:
+            return {
+                "score": 0, "score_label": "No information found",
+                "assessment": f"Research failed: {_fe}",
+                "source_url": None, "search_method": "failed", "raw_error": str(_fe)
+            }
+
+    _score = int(_extracted.get("score", 0))
+    if _score not in range(6):
+        _score = 0
+    return {
+        "score": _score,
+        "score_label": _extracted.get("score_label", _score_labels.get(_score, "Unknown")),
+        "assessment": _extracted.get("assessment", "No assessment available."),
+        "source_url": _extracted.get("source_url"),
+        "search_method": _search_method,
+        "raw_error": _responses_api_error,
+    }
+
+# -----------------------------------------------
 # TABS
 # -----------------------------------------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "Single Account Enrichment", "Bulk Account Enrichment", "Lead Matching",
-    "Customer Segment Logic", "Fenergo Segmentation", "Field Population Logic"
+    "Reference & Process Overview"
 ])
 
 # ===============================================
@@ -2037,6 +2333,8 @@ with tab1:
         ("tab1_research", None),
         ("tab1_segmentation", None),
         ("tab1_snap", {}),
+        ("tab1_icp_results", None),
+        ("tab1_icp_requested", False),
     ]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
@@ -2102,6 +2400,8 @@ with tab1:
         st.session_state["tab1_phase"] = "dup_check"
         st.session_state["tab1_research"] = None
         st.session_state["tab1_segmentation"] = None
+        st.session_state["tab1_icp_results"] = None
+        st.session_state["tab1_icp_requested"] = False
         st.rerun()
 
     # ── Phases: dup_check / enrichment ────────────────────────────────────────
@@ -2280,7 +2580,7 @@ with tab1:
 
                 st.divider()
                 st.markdown(
-                    '<p class="fen-section-title">Enrichment Results</p>',
+                    '<p class="fen-section-title">Segmentation Results</p>',
                     unsafe_allow_html=True,
                 )
 
@@ -2446,6 +2746,129 @@ with tab1:
                         f"**{_alt_seg}** (alternative). "
                         "Please review and confirm the most appropriate segment."
                     )
+
+                # ── ICP CHARACTERISTICS STEP ───────────────────────────────────
+                st.divider()
+                st.markdown('<p class="fen-section-title">ICP Characteristics Assessment</p>', unsafe_allow_html=True)
+                st.markdown(
+                    "Run deep AI research to assess whether **" + html_escape(_account_name) +
+                    "** meets Fenergo's Ideal Customer Profile (ICP) criteria. "
+                    "This drills beyond segmentation to evaluate strategic fit.",
+                    unsafe_allow_html=False
+                )
+
+                _icp_run_btn = st.button("🔍 Run ICP Characteristics", type="primary", use_container_width=True, key="run_icp_btn")
+                if _icp_run_btn:
+                    st.session_state["tab1_icp_requested"] = True
+                    st.session_state["tab1_icp_results"] = None
+                    st.rerun()
+
+                # Run ICP research when requested and results not yet available
+                if st.session_state.get("tab1_icp_requested") and st.session_state.get("tab1_icp_results") is None:
+                    # Run ICP research
+                    if not icp_characteristics:
+                        st.error("ICP Characteristics file not loaded. Please ensure 'ICP Characteristics.xlsx' is in the repo root.")
+                    else:
+                        _icp_results = []
+                        with st.status("Running ICP Characteristics research (live web search)...", expanded=True) as _icp_status:
+                            for _ic in icp_characteristics:
+                                _ic_name = _ic["characteristic"]
+                                st.write(f"🔍 Researching: **{_ic_name}** (weight: {_ic['weight']}%)")
+                                _scoring_rubric = {
+                                    "1": _ic["score_1"], "2": _ic["score_2"],
+                                    "3": _ic["score_3"], "4": _ic["score_4"],
+                                    "5": _ic["score_5"],
+                                }
+                                _ic_result = research_icp_characteristic(
+                                    _account_name, _ic_name, _ic["what_it_measures"],
+                                    _ic["weight"], _ic["evidence"], _scoring_rubric
+                                )
+                                _ic_result["characteristic"] = _ic_name
+                                _ic_result["weight"] = _ic["weight"]
+                                _ic_result["what_it_measures"] = _ic["what_it_measures"]
+                                _ic_result["id"] = _ic["id"]
+                                _icp_results.append(_ic_result)
+                                _score_emoji = {0:"⬜",1:"🔴",2:"🟠",3:"🟡",4:"🟢",5:"✅"}.get(_ic_result["score"], "⬜")
+                                st.write(f"  {_score_emoji} Score: {_ic_result['score']}/5 — {_ic_result['score_label']}")
+                            _icp_status.update(label="ICP Characteristics research complete", state="complete")
+                        st.session_state["tab1_icp_results"] = _icp_results
+
+                # Display ICP results if available
+                _icp_results_display = st.session_state.get("tab1_icp_results")
+                if _icp_results_display and _icp_results_display != "__running__":
+                    # Individual characteristic cards
+                    _score_css = {0:"icp-score-0",1:"icp-score-1",2:"icp-score-2",3:"icp-score-3",4:"icp-score-4",5:"icp-score-5"}
+                    _score_emoji = {0:"⬜",1:"🔴",2:"🟠",3:"🟡",4:"🟢",5:"✅"}
+
+                    for _ir in _icp_results_display:
+                        _sc = _ir.get("score", 0)
+                        _sc_class = _score_css.get(_sc, "icp-score-0")
+                        _sc_emoji = _score_emoji.get(_sc, "⬜")
+                        _src_url = _ir.get("source_url")
+                        _src_html = ""
+                        if _src_url and isinstance(_src_url, str) and _src_url.startswith("http"):
+                            _src_display = _src_url[:70] + "..." if len(_src_url) > 70 else _src_url
+                            _src_html = f'<a href="{_src_url}" target="_blank" rel="noopener noreferrer" style="font-size:0.75rem;color:#21CFB2;">🔗 {_src_display}</a>'
+                        elif _sc == 0:
+                            _src_html = '<span style="color:#706e6b;font-size:0.75rem;">No information found</span>'
+
+                        _method = _ir.get("search_method", "")
+                        _method_badge = ""
+                        if _method == "responses_api_web_search":
+                            _method_badge = '<span style="background:#d1fae5;color:#065f46;font-size:0.7rem;padding:1px 6px;border-radius:10px;font-weight:600;">🌐 Live Web</span>'
+                        elif _method == "chat_completions_fallback":
+                            _method_badge = '<span style="background:#fef3c7;color:#92400e;font-size:0.7rem;padding:1px 6px;border-radius:10px;font-weight:600;">⚠️ Training Data</span>'
+
+                        st.markdown(f"""
+<div class="icp-card">
+  <div class="icp-card-title">
+    {_sc_emoji} {html_escape(_ir.get('characteristic', ''))}
+    <span class="icp-score-badge {_sc_class}">{_sc}/5 — {html_escape(_ir.get('score_label', ''))}</span>
+    <span style="font-size:0.72rem;color:#5a7a7a;margin-left:8px;">Weight: {_ir.get('weight', 0)}%</span>
+    {_method_badge}
+  </div>
+  <div style="font-size:0.82rem;color:#4a5568;margin-bottom:8px;">{html_escape(_ir.get('assessment', 'No assessment available.'))}</div>
+  <div>{_src_html}</div>
+</div>
+""", unsafe_allow_html=True)
+
+                    # Overall ICP Assessment
+                    _total_weight = sum(ir.get("weight", 0) for ir in _icp_results_display)
+                    _weighted_score = sum(ir.get("score", 0) * ir.get("weight", 0) for ir in _icp_results_display)
+                    _max_weighted = 5 * _total_weight
+                    _icp_pct = round((_weighted_score / _max_weighted * 100) if _max_weighted > 0 else 0, 1)
+                    _criteria_met = sum(1 for ir in _icp_results_display if ir.get("score", 0) >= 3)
+                    _total_criteria = len(_icp_results_display)
+
+                    if _icp_pct >= 70:
+                        _icp_verdict = "✅ Strong ICP Fit"
+                        _verdict_note = "This account strongly matches Fenergo's ICP criteria."
+                    elif _icp_pct >= 45:
+                        _icp_verdict = "🟡 Moderate ICP Fit"
+                        _verdict_note = "This account shows moderate ICP alignment — further qualification recommended."
+                    else:
+                        _icp_verdict = "🔴 Weak ICP Fit"
+                        _verdict_note = "This account shows limited ICP alignment at this stage."
+
+                    st.markdown(f"""
+<div class="icp-overall">
+  <div class="icp-overall-title">🎯 Overall ICP Assessment</div>
+  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+    <div>
+      <div class="icp-overall-score">{_icp_pct}%</div>
+      <div style="color:rgba(255,255,255,0.7);font-size:0.78rem;">Weighted ICP Score</div>
+    </div>
+    <div>
+      <div style="font-size:1.4rem;font-weight:700;color:#21CFB2;">{_criteria_met}/{_total_criteria}</div>
+      <div style="color:rgba(255,255,255,0.7);font-size:0.78rem;">Criteria met (score ≥ 3)</div>
+    </div>
+    <div style="flex:1;min-width:200px;">
+      <div style="font-size:1rem;font-weight:700;color:#ffffff;margin-bottom:4px;">{_icp_verdict}</div>
+      <div style="color:rgba(255,255,255,0.75);font-size:0.82rem;">{_verdict_note}</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ===============================================
 # TAB 2 — BULK ACCOUNT ENRICHMENT
@@ -3012,554 +3435,651 @@ with tab3:
     """, unsafe_allow_html=True)
 
 # ===============================================
-# TAB 4 — CUSTOMER SEGMENT LOGIC (visual flowchart)
+# TAB 4 — REFERENCE & PROCESS OVERVIEW
 # ===============================================
 with tab4:
-    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Customer Segment Logic</span></div>', unsafe_allow_html=True)
-    st.markdown('<p class="fen-section-title">Customer Segment Logic</p>', unsafe_allow_html=True)
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Reference &amp; Process Overview</span></div>', unsafe_allow_html=True)
+    st.markdown('<p class="fen-section-title">Reference &amp; Process Overview</p>', unsafe_allow_html=True)
     st.markdown("""
-This tab explains how the **Customer Segment** (Enterprise / Mid-Market / Scale-up) is derived for each account.
-The classification is based on the account's **Market Segment** combined with key financial metrics.
+This tab provides reference documentation for the Account Intelligence pipeline:
+the overall data flow, customer segment logic, segmentation hierarchy, and field population details.
 """)
 
-    # Visual flowchart diagram
+    # ── Overall Data Flow Diagram ─────────────────────────────────────────────
+    st.markdown('<p class="fen-section-title">📊 Overall Data Flow</p>', unsafe_allow_html=True)
     st.markdown("""
-<div class="fc-outer">
-  <div class="fc-rule-banner">
-    ⭐ &nbsp;HIGHEST TIER WINS &nbsp;—&nbsp; any single metric reaching the Enterprise threshold classifies the account as Enterprise, regardless of other metrics.
-    &nbsp;&nbsp;|&nbsp;&nbsp; ❓ All metrics unknown → defaults to <strong>Scale-up</strong>
+<div class="flow-outer">
+<div style="font-size:0.82rem;color:#5a7a7a;margin-bottom:16px;">
+This diagram shows how each data attribute is sourced and how they flow into the <strong>Account Category</strong> — the central output of the enrichment pipeline.
+</div>
+
+<div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:center;margin-bottom:16px;">
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <div class="flow-box" style="background:#e8f7f5;">🌐 Revenue (Live Web)</div>
+    <div class="flow-box" style="background:#e8f7f5;">🌐 AUM (Live Web)</div>
+    <div class="flow-box" style="background:#e8f7f5;">🌐 Employees (Live Web)</div>
   </div>
+  <div class="flow-arrow" style="text-align:center;">→</div>
+  <div style="text-align:center;">
+    <div class="flow-box" style="background:#fff3cd;border-color:#856404;color:#002E33;">📊 Customer Segment<br><span style="font-size:0.7rem;font-weight:400;">(Enterprise / Mid-Market / Scale-up)</span></div>
+  </div>
+  <div class="flow-arrow" style="text-align:center;">→</div>
+  <div style="text-align:center;">
+    <div class="flow-box-centre">🗂️ Account Category<br><span style="font-size:0.72rem;font-weight:400;">(Cat 1 / 2 / 3)</span></div>
+    <div class="flow-note">Central output of the enrichment pipeline</div>
+  </div>
+</div>
 
-  <div class="fc-segments-grid">
-
-    <!-- Banks -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">🏦 Banks</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">AUM (Assets)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €200bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €200bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Annual Revenue</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Employees (FTE)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Asset Mgmt -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">📈 Asset Mgmt., Servicing &amp; Insurance</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">AUM (Assets)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €100bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €100bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Annual Revenue</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Employees (FTE)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 150 – 1,000</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 150</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Corporates -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">🏭 Corporates</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">AUM (Assets)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-na">N/A — not assessed for Corporates</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Annual Revenue</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Employees (FTE)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Fintech -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">💳 Fintech</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">AUM (Assets)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-na">N/A — not assessed for Fintech</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Annual Revenue</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €500m – €10bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €500m</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Employees (FTE)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 250 – 1,000</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 250</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Full-Service Banks -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">🌐 Full-Service Banks</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">G-SIB designation</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› Automatic (G-SIB list match)</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">D-SIB designation</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› With regulator verification</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Neither G-SIB nor D-SIB</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-na">Falls back to Banks thresholds ↗</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Other / Default -->
-    <div class="fc-segment-card">
-      <div class="fc-seg-header">📦 Other / Default</div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">AUM (Assets)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-na">N/A — not assessed</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Annual Revenue</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
-        </div>
-      </div>
-      <div class="fc-metric-group">
-        <div class="fc-metric-label">Employees (FTE)</div>
-        <div class="fc-tiers">
-          <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
-          <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
-          <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- end fc-segments-grid -->
-
-  <div class="fc-legend">
-    <div class="fc-legend-item">
-      <div class="fc-legend-dot" style="background:#d4edda; border:1px solid #155724;"></div>
-      <span style="color:#155724; font-weight:600;">Enterprise</span>
-    </div>
-    <div class="fc-legend-item">
-      <div class="fc-legend-dot" style="background:#fff3cd; border:1px solid #856404;"></div>
-      <span style="color:#856404; font-weight:600;">Mid-Market</span>
-    </div>
-    <div class="fc-legend-item">
-      <div class="fc-legend-dot" style="background:#f8d7da; border:1px solid #721c24;"></div>
-      <span style="color:#721c24; font-weight:600;">Scale-up</span>
-    </div>
-    <div class="fc-legend-item">
-      <div class="fc-legend-dot" style="background:#f3f3f3; border:1px solid #ccc;"></div>
-      <span style="color:#706e6b; font-weight:600;">Not applicable</span>
+<div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:start;margin-bottom:16px;">
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <div class="flow-box" style="background:#e8f7f5;">🌐 Detailed Business Segment<br><span style="font-size:0.7rem;font-weight:400;">(AI web research)</span></div>
+    <div style="margin-left:16px;display:flex;flex-direction:column;gap:4px;">
+      <div style="color:#21CFB2;font-size:0.8rem;text-align:center;">↓ spin-off</div>
+      <div class="flow-box" style="font-size:0.75rem;background:#ede9fe;border-color:#7c3aed;color:#4c1d95;">🤖 Industry Classification<br>Rationale</div>
     </div>
   </div>
+  <div class="flow-arrow" style="text-align:center;padding-top:8px;">→</div>
+  <div style="display:flex;flex-direction:column;gap:6px;padding-top:2px;">
+    <div class="flow-box" style="background:#e8f7f5;">📊 Market Segment<br><span style="font-size:0.7rem;font-weight:400;">(from mapping table)</span></div>
+    <div class="flow-box" style="background:#e8f7f5;">📂 Business Segment<br><span style="font-size:0.7rem;font-weight:400;">(from mapping table)</span></div>
+  </div>
+  <div class="flow-arrow" style="text-align:center;padding-top:20px;">→</div>
+  <div style="padding-top:20px;">
+    <div style="font-size:0.78rem;color:#5a7a7a;text-align:center;">Business Segment flows<br>into Customer Segment &amp;<br>Account Category lookup</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:start;margin-bottom:16px;">
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <div class="flow-box" style="background:#ede9fe;border-color:#7c3aed;color:#4c1d95;">👤 Country<br><span style="font-size:0.7rem;font-weight:400;">(user input)</span></div>
+    <div style="margin-left:16px;display:flex;flex-direction:column;gap:4px;">
+      <div style="color:#21CFB2;font-size:0.8rem;text-align:center;">↓ spin-off</div>
+      <div class="flow-box" style="font-size:0.75rem;background:#d1fae5;border-color:#065f46;color:#065f46;">👥 Secondary Account Owner<br><span style="font-size:0.68rem;">(from country mapping table)</span></div>
+    </div>
+  </div>
+  <div class="flow-arrow" style="text-align:center;padding-top:8px;">→</div>
+  <div style="padding-top:8px;">
+    <div class="flow-box-centre" style="font-size:0.82rem;">🗂️ Account Category<br><span style="font-size:0.7rem;font-weight:400;">(Cat 1 / 2 / 3)</span></div>
+    <div class="flow-note" style="text-align:center;">Country logic determined by SAM review —<br>server availability, regulatory compliance strength, etc.</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:center;">
+  <div>
+    <div class="flow-box" style="background:#ede9fe;border-color:#7c3aed;color:#4c1d95;">👤 Customer Name<br><span style="font-size:0.7rem;font-weight:400;">(user input)</span></div>
+  </div>
+  <div class="flow-arrow" style="text-align:center;">→</div>
+  <div>
+    <div class="flow-box" style="background:#e8f7f5;">🌐 Ultimate Parent<br><span style="font-size:0.7rem;font-weight:400;">(AI web research)</span></div>
+  </div>
+  <div class="flow-arrow" style="text-align:center;">→</div>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <div class="flow-box" style="background:#d1fae5;border-color:#065f46;color:#065f46;font-size:0.75rem;">📋 Reporting Group<br><span style="font-size:0.68rem;">(SF cross-ref or AI suggestion)</span></div>
+    <div class="flow-box" style="background:#d1fae5;border-color:#065f46;color:#065f46;font-size:0.75rem;">🔗 Salesforce Parent Name<br><span style="font-size:0.68rem;">(SF cross-ref)</span></div>
+  </div>
+</div>
+
+<div style="margin-top:16px;padding:10px 14px;background:#f0f9f8;border-radius:8px;font-size:0.78rem;color:#002E33;border-left:3px solid #21CFB2;">
+  <strong>Legend:</strong>
+  &nbsp; <span style="background:#e8f7f5;border:1px solid #21CFB2;padding:1px 6px;border-radius:4px;">🌐 Live Web Search</span>
+  &nbsp; <span style="background:#ede9fe;border:1px solid #7c3aed;padding:1px 6px;border-radius:4px;color:#4c1d95;">👤 User Input</span>
+  &nbsp; <span style="background:#d1fae5;border:1px solid #065f46;padding:1px 6px;border-radius:4px;color:#065f46;">🔗 SF Cross-ref</span>
+  &nbsp; <span style="background:#fef3c7;border:1px solid #856404;padding:1px 6px;border-radius:4px;color:#856404;">📊 Rules / Matrix</span>
+  &nbsp; <span style="background:#fff0f0;border:1px solid #dc2626;padding:1px 6px;border-radius:4px;color:#dc2626;">🗂️ Central Output</span>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("### 🏦 Full-Service Banks — Special Classification Logic")
-    st.markdown("""
-Full-Service Banks follow a distinct classification path:
+    st.divider()
 
-| Designation | How classified | Notes |
-|---|---|---|
-| **G-SIB** (Global Systemically Important Bank) | Automatically **Enterprise** | The G-SIB list is maintained in the code (`GSIB_LIST`). If the account name matches any G-SIB, it is immediately classified as Enterprise. |
-| **D-SIB** (Domestic Systemically Important Bank) | **Enterprise** after verification | D-SIBs are matched against a static list by country (`DSIB_LIST`). A warning is shown to verify with the local regulator before finalising. |
-| **Neither G-SIB nor D-SIB** | Falls back to **Banks** thresholds | AUM / Revenue / Employees thresholds for "Banks" are applied as normal. |
+    # Sub-tabs for reference content
+    ref_tab1, ref_tab2, ref_tab3 = st.tabs([
+        "📊 Customer Segment Logic",
+        "🏛️ Fenergo Segmentation",
+        "📋 Field Population Logic",
+    ])
 
-> ⚠️ The D-SIB list is maintained in the application code and should be kept up to date. D-SIB designations can change — always verify with the relevant local regulator.
-""")
+    with ref_tab1:
 
-    st.markdown("---")
-    st.markdown("### 📝 Notes")
-    st.markdown("""
-- **AUM** (Assets Under Management) is primarily relevant for Banks and Asset Management firms. For Corporates and Fintechs, it is typically N/A.
-- **Revenue** figures should be in EUR billions (€bn). The LLM converts values from other currencies automatically.
-- **Employees** refers to full-time equivalent (FTE) headcount.
-- When both Revenue and Employees are known, **either one** can independently trigger Enterprise or Mid-Market — the highest tier wins.
-- The "Other / Default" thresholds apply to any Market Segment not explicitly listed above (e.g. Other, Precious Metals, Legal Services, etc.).
-""")
+        st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Customer Segment Logic</span></div>', unsafe_allow_html=True)
+        st.markdown('<p class="fen-section-title">Customer Segment Logic</p>', unsafe_allow_html=True)
+        st.markdown("""
+    This tab explains how the **Customer Segment** (Enterprise / Mid-Market / Scale-up) is derived for each account.
+    The classification is based on the account's **Market Segment** combined with key financial metrics.
+    """)
 
-# ===============================================
-# TAB 5 — FENERGO SEGMENTATION (visual tree)
-# ===============================================
-with tab5:
-    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Fenergo Segmentation</span></div>', unsafe_allow_html=True)
-    st.markdown('<p class="fen-section-title">Fenergo Segmentation Hierarchy</p>', unsafe_allow_html=True)
-    st.markdown("""
-This tab shows the full **three-level segmentation hierarchy** used by Fenergo.
-Every account is classified across three levels:
+        # Visual flowchart diagram
+        st.markdown("""
+    <div class="fc-outer">
+      <div class="fc-rule-banner">
+        ⭐ &nbsp;HIGHEST TIER WINS &nbsp;—&nbsp; any single metric reaching the Enterprise threshold classifies the account as Enterprise, regardless of other metrics.
+        &nbsp;&nbsp;|&nbsp;&nbsp; ❓ All metrics unknown → defaults to <strong>Scale-up</strong>
+      </div>
 
-> **Market Segment** → **Business Segment** → **Detailed Business Segment**
+      <div class="fc-segments-grid">
 
-The Detailed Business Segment drives the **Customer Segment**, **Account Category**, and **Secondary Account Owner** assignments.
-""")
+        <!-- Banks -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">🏦 Banks</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">AUM (Assets)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €200bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €200bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Annual Revenue</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Employees (FTE)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+            </div>
+          </div>
+        </div>
 
-    # Build a grouped structure from SEGMENT_HIERARCHY
-    _hier_dict = {}
-    for (detailed, business, market) in SEGMENT_HIERARCHY:
-        _hier_dict.setdefault(market, {}).setdefault(business, []).append(detailed)
+        <!-- Asset Mgmt -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">📈 Asset Mgmt., Servicing &amp; Insurance</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">AUM (Assets)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €100bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €10bn – €100bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €10bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Annual Revenue</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Employees (FTE)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 150 – 1,000</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 150</div>
+            </div>
+          </div>
+        </div>
 
-    # Visual tree diagram
-    _tree_html_parts = ['<div class="seg-tree-outer">']
-    for _ms, _bs_dict in _hier_dict.items():
-        _tree_html_parts.append(f'<div class="seg-market-section">')
-        _tree_html_parts.append(f'<div class="seg-market-label">🏛️ {html_escape(_ms)}</div>')
-        _tree_html_parts.append('<div class="seg-business-row">')
-        for _bs, _ds_list in _bs_dict.items():
-            _tree_html_parts.append('<div class="seg-business-card">')
-            _tree_html_parts.append(f'<div class="seg-business-header">📂 {html_escape(_bs)}</div>')
-            _tree_html_parts.append('<div class="seg-detailed-list">')
-            for _ds in _ds_list:
-                _tree_html_parts.append(f'<div class="seg-detailed-item">• {html_escape(_ds)}</div>')
-            _tree_html_parts.append('</div>')  # seg-detailed-list
-            _tree_html_parts.append('</div>')  # seg-business-card
-        _tree_html_parts.append('</div>')  # seg-business-row
-        # Special note for Full-Service Banks
-        if _ms == "Full-Service Banks":
-            _tree_html_parts.append(
-                '<div style="margin:8px 0 0 20px; padding:10px 14px; background:#f0f9f8; border-left:3px solid #21CFB2; border-radius:0 6px 6px 0; font-size:0.81rem; color:#002E33;">'
-                '<strong>⚠️ Special logic:</strong> Requires G-SIB or D-SIB designation for Enterprise. '
-                'Without it, standard Banks thresholds apply.'
-                '</div>'
-            )
-        _tree_html_parts.append('</div>')  # seg-market-section
-    _tree_html_parts.append('</div>')  # seg-tree-outer
-    st.markdown("".join(_tree_html_parts), unsafe_allow_html=True)
+        <!-- Corporates -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">🏭 Corporates</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">AUM (Assets)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-na">N/A — not assessed for Corporates</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Annual Revenue</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Employees (FTE)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+            </div>
+          </div>
+        </div>
 
-    st.markdown("---")
-    st.markdown("### 📝 Notes")
-    st.markdown("""
-- The **Detailed Business Segment** is the most granular classification — it is what the LLM assigns based on the company's industry and activities.
-- The **Business Segment** is the mid-level grouping (e.g. "Asset & Wealth Mgmt." groups together Asset Management, Hedge Funds, Pension Funds, etc.).
-- The **Market Segment** is the top-level grouping that drives the Customer Segment thresholds (see the **Customer Segment Logic** tab).
-- These three levels are used together to determine the **Account Category** (via the account category matrix) and the **Secondary Account Owner**.
-- The G-SIB and D-SIB lists (`GSIB_LIST` and `DSIB_LIST`) are maintained in the application code and should be reviewed periodically to ensure accuracy.
-""")
+        <!-- Fintech -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">💳 Fintech</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">AUM (Assets)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-na">N/A — not assessed for Fintech</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Annual Revenue</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €500m – €10bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €500m</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Employees (FTE)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 1,000</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 250 – 1,000</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 250</div>
+            </div>
+          </div>
+        </div>
 
-# ===============================================
-# TAB 6 — FIELD POPULATION LOGIC
-# ===============================================
-with tab6:
-    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Field Population Logic</span></div>', unsafe_allow_html=True)
-    st.markdown('<p class="fen-section-title">Field Population Logic</p>', unsafe_allow_html=True)
-    st.markdown("""
-This tab provides a detailed breakdown of **how each enriched field is populated** — from simple user
-input through to multi-step AI web research and matrix lookups. It illustrates the depth and
-sophistication of the enrichment pipeline.
-""")
+        <!-- Full-Service Banks -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">🌐 Full-Service Banks</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">G-SIB designation</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› Automatic (G-SIB list match)</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">D-SIB designation</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› With regulator verification</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Neither G-SIB nor D-SIB</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-na">Falls back to Banks thresholds ↗</div>
+            </div>
+          </div>
+        </div>
 
-    st.info("""
-**Data source legend:**
-&nbsp; 👤 **User Input** — provided directly by the user
-&nbsp; 🌐 **Live Web Search** — AI searches the web in real time
-&nbsp; 🤖 **AI Reasoning** — AI derives/classifies from research
-&nbsp; 📊 **Matrix / Rules Engine** — deterministic lookup or rules
-&nbsp; 🔗 **Salesforce Cross-ref** — matched against your SF account list
-""")
+        <!-- Other / Default -->
+        <div class="fc-segment-card">
+          <div class="fc-seg-header">📦 Other / Default</div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">AUM (Assets)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-na">N/A — not assessed</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Annual Revenue</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; €10bn</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› €2bn – €10bn</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; €2bn</div>
+            </div>
+          </div>
+          <div class="fc-metric-group">
+            <div class="fc-metric-label">Employees (FTE)</div>
+            <div class="fc-tiers">
+              <div class="fc-tier fc-enterprise">Enterprise &nbsp;› &gt; 5,000</div>
+              <div class="fc-tier fc-midmarket">Mid-Market &nbsp;› 1,000 – 5,000</div>
+              <div class="fc-tier fc-scaleup">Scale-up &nbsp;› &lt; 1,000</div>
+            </div>
+          </div>
+        </div>
 
-    st.markdown("""
-<div class="fpl-section-header">📋 Core Account Identification</div>
-<div class="fpl-grid">
+      </div><!-- end fc-segments-grid -->
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🏢 Account Name</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-user">👤 User Input</span>
+      <div class="fc-legend">
+        <div class="fc-legend-item">
+          <div class="fc-legend-dot" style="background:#d4edda; border:1px solid #155724;"></div>
+          <span style="color:#155724; font-weight:600;">Enterprise</span>
+        </div>
+        <div class="fc-legend-item">
+          <div class="fc-legend-dot" style="background:#fff3cd; border:1px solid #856404;"></div>
+          <span style="color:#856404; font-weight:600;">Mid-Market</span>
+        </div>
+        <div class="fc-legend-item">
+          <div class="fc-legend-dot" style="background:#f8d7da; border:1px solid #721c24;"></div>
+          <span style="color:#721c24; font-weight:600;">Scale-up</span>
+        </div>
+        <div class="fc-legend-item">
+          <div class="fc-legend-dot" style="background:#f3f3f3; border:1px solid #ccc;"></div>
+          <span style="color:#706e6b; font-weight:600;">Not applicable</span>
+        </div>
+      </div>
     </div>
-    <div class="fpl-description">
-      Provided directly by the user as the primary identifier for the account.
-      Used as the starting point for all downstream research and matching.
-    </div>
-  </div>
+    """, unsafe_allow_html=True)
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">📜 Legal Name</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
-    </div>
-    <div class="fpl-description">
-      AI (OpenAI gpt-4.1 with live web search) researches the company's full registered legal name.
-      Sources checked: company registries (Companies House, SEC EDGAR), regulatory filings,
-      Bloomberg, official corporate websites and annual reports.
-    </div>
-  </div>
+        st.markdown("---")
+        st.markdown("### 🏦 Full-Service Banks — Special Classification Logic")
+        st.markdown("""
+    Full-Service Banks follow a distinct classification path:
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🌍 Country</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-user">👤 User Input</span>
-    </div>
-    <div class="fpl-description">
-      The country of the account's headquarters is selected by the user from a
-      dropdown of 60+ countries. Used as the input to the Account Category matrix lookup
-      and as a contextual signal for all AI research.
-    </div>
-  </div>
+    | Designation | How classified | Notes |
+    |---|---|---|
+    | **G-SIB** (Global Systemically Important Bank) | Automatically **Enterprise** | The G-SIB list is maintained in the code (`GSIB_LIST`). If the account name matches any G-SIB, it is immediately classified as Enterprise. |
+    | **D-SIB** (Domestic Systemically Important Bank) | **Enterprise** after verification | D-SIBs are matched against a static list by country (`DSIB_LIST`). A warning is shown to verify with the local regulator before finalising. |
+    | **Neither G-SIB nor D-SIB** | Falls back to **Banks** thresholds | AUM / Revenue / Employees thresholds for "Banks" are applied as normal. |
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🗺️ Region</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-matrix">📊 Country Mapping Table</span>
-    </div>
-    <div class="fpl-description">
-      Auto-derived from Country using a 60+ country mapping table (EMEA / APAC / AMER).
-      No user input required — the region is determined instantly from the selected country.
-      Also drives the Secondary Account Owner assignment rules.
-    </div>
-  </div>
+    > ⚠️ The D-SIB list is maintained in the application code and should be kept up to date. D-SIB designations can change — always verify with the relevant local regulator.
+    """)
 
-</div>
+        st.markdown("---")
+        st.markdown("### 📝 Notes")
+        st.markdown("""
+    - **AUM** (Assets Under Management) is primarily relevant for Banks and Asset Management firms. For Corporates and Fintechs, it is typically N/A.
+    - **Revenue** figures should be in EUR billions (€bn). The LLM converts values from other currencies automatically.
+    - **Employees** refers to full-time equivalent (FTE) headcount.
+    - When both Revenue and Employees are known, **either one** can independently trigger Enterprise or Mid-Market — the highest tier wins.
+    - The "Other / Default" thresholds apply to any Market Segment not explicitly listed above (e.g. Other, Precious Metals, Legal Services, etc.).
+    """)
 
-<div class="fpl-section-header">🏷️ Industry Classification</div>
-<div class="fpl-grid">
+    with ref_tab2:
+        st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Fenergo Segmentation</span></div>', unsafe_allow_html=True)
+        st.markdown('<p class="fen-section-title">Fenergo Segmentation Hierarchy</p>', unsafe_allow_html=True)
+        st.markdown("""
+    This tab shows the full **three-level segmentation hierarchy** used by Fenergo.
+    Every account is classified across three levels:
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🔍 Detailed Business Segment</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Classification</span>
-    </div>
-    <div class="fpl-description">
-      AI classifies the company into exactly <strong>one of 38 Detailed Business Segments</strong>
-      using live web research. The AI searches company websites, news, regulatory filings and
-      financial databases to understand the company's core business activities and select the
-      most appropriate segment.
-    </div>
-  </div>
+    > **Market Segment** → **Business Segment** → **Detailed Business Segment**
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">📂 Business Segment</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
-    </div>
-    <div class="fpl-description">
-      Auto-derived from the Detailed Business Segment via a 3-level segment hierarchy table.
-      No AI inference required — the Business Segment is a deterministic roll-up from the
-      Detailed Segment (e.g. "Asset Management" → "Asset &amp; Wealth Mgmt.").
-    </div>
-  </div>
+    The Detailed Business Segment drives the **Customer Segment**, **Account Category**, and **Secondary Account Owner** assignments.
+    """)
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🏛️ Market Segment</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
-    </div>
-    <div class="fpl-description">
-      Auto-derived from the Detailed Business Segment via the same 3-level hierarchy.
-      The Market Segment is the top-level grouping (Banks / Asset Mgmt. / Corporates / Fintech /
-      Full-Service Banks / Other) and drives the Customer Segment threshold logic.
-    </div>
-  </div>
+        # Build a grouped structure from SEGMENT_HIERARCHY
+        _hier_dict = {}
+        for (detailed, business, market) in SEGMENT_HIERARCHY:
+            _hier_dict.setdefault(market, {}).setdefault(business, []).append(detailed)
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">📝 Industry Classification Rationale</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-ai">🤖 AI Explanation</span>
-    </div>
-    <div class="fpl-description">
-      AI generates a 1–2 sentence explanation of <em>why</em> the chosen Detailed Business Segment
-      was selected. This provides transparency and allows users to verify or override the
-      AI's classification reasoning.
-    </div>
-  </div>
+        # Visual tree diagram
+        _tree_html_parts = ['<div class="seg-tree-outer">']
+        for _ms, _bs_dict in _hier_dict.items():
+            _tree_html_parts.append(f'<div class="seg-market-section">')
+            _tree_html_parts.append(f'<div class="seg-market-label">🏛️ {html_escape(_ms)}</div>')
+            _tree_html_parts.append('<div class="seg-business-row">')
+            for _bs, _ds_list in _bs_dict.items():
+                _tree_html_parts.append('<div class="seg-business-card">')
+                _tree_html_parts.append(f'<div class="seg-business-header">📂 {html_escape(_bs)}</div>')
+                _tree_html_parts.append('<div class="seg-detailed-list">')
+                for _ds in _ds_list:
+                    _tree_html_parts.append(f'<div class="seg-detailed-item">• {html_escape(_ds)}</div>')
+                _tree_html_parts.append('</div>')  # seg-detailed-list
+                _tree_html_parts.append('</div>')  # seg-business-card
+            _tree_html_parts.append('</div>')  # seg-business-row
+            # Special note for Full-Service Banks (now a Business Segment under Banks)
+            if _ms == "Banks" and "Full-Service Banks" in _bs_dict:
+                _tree_html_parts.append(
+                    '<div style="margin:8px 0 0 20px; padding:10px 14px; background:#f0f9f8; border-left:3px solid #21CFB2; border-radius:0 6px 6px 0; font-size:0.81rem; color:#002E33;">'
+                    '<strong>⚠️ Special logic:</strong> Requires G-SIB or D-SIB designation for Enterprise. '
+                    'Without it, standard Banks thresholds apply.'
+                    '</div>'
+                )
+            _tree_html_parts.append('</div>')  # seg-market-section
+        _tree_html_parts.append('</div>')  # seg-tree-outer
+        st.markdown("".join(_tree_html_parts), unsafe_allow_html=True)
 
-</div>
+        st.markdown("---")
+        st.markdown("### 📝 Notes")
+        st.markdown("""
+    - The **Detailed Business Segment** is the most granular classification — it is what the LLM assigns based on the company's industry and activities.
+    - The **Business Segment** is the mid-level grouping (e.g. "Asset & Wealth Mgmt." groups together Asset Management, Hedge Funds, Pension Funds, etc.).
+    - The **Market Segment** is the top-level grouping that drives the Customer Segment thresholds (see the **Customer Segment Logic** tab).
+    - These three levels are used together to determine the **Account Category** (via the account category matrix) and the **Secondary Account Owner**.
+    - The G-SIB and D-SIB lists (`GSIB_LIST` and `DSIB_LIST`) are maintained in the application code and should be reviewed periodically to ensure accuracy.
+    """)
 
-<div class="fpl-section-header">💹 Customer Segmentation</div>
-<div class="fpl-grid">
+    with ref_tab3:
+        st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Field Population Logic</span></div>', unsafe_allow_html=True)
+        st.markdown('<p class="fen-section-title">Field Population Logic</p>', unsafe_allow_html=True)
+        st.markdown("""
+    This tab provides a detailed breakdown of **how each enriched field is populated** — from simple user
+    input through to multi-step AI web research and matrix lookups. It illustrates the depth and
+    sophistication of the enrichment pipeline.
+    """)
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">📊 Customer Segment</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
-      <span class="fpl-source-badge badge-web">🌐 Live Web Data</span>
-    </div>
-    <div class="fpl-description">
-      A rules engine evaluates AUM, Annual Revenue, and Employees against
-      market-segment-specific thresholds. <strong>"Highest tier wins"</strong> — any single metric
-      reaching Enterprise level classifies the account as Enterprise.
-      G-SIB/D-SIB banks get special handling: they are automatically Enterprise
-      without relying on financial metrics.
-    </div>
-  </div>
+        st.info("""
+    **Data source legend:**
+    &nbsp; 👤 **User Input** — provided directly by the user
+    &nbsp; 🌐 **Live Web Search** — AI searches the web in real time
+    &nbsp; 🤖 **AI Reasoning** — AI derives/classifies from research
+    &nbsp; 📊 **Matrix / Rules Engine** — deterministic lookup or rules
+    &nbsp; 🔗 **Salesforce Cross-ref** — matched against your SF account list
+    """)
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🗂️ Account Category</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-matrix">📊 Excel Matrix Lookup</span>
-    </div>
-    <div class="fpl-description">
-      A matrix lookup using <strong>Country × Customer Segment × Business Segment</strong>
-      against an Excel-based matrix covering 60+ countries. Returns Category 1, 2, or 3,
-      which drives commercial prioritisation. No AI involved — this is a pure
-      deterministic lookup against the approved business rules matrix.
-    </div>
-  </div>
+        st.markdown("""
+    <div class="fpl-section-header">📋 Core Account Identification</div>
+    <div class="fpl-grid">
 
-</div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">🏢 Account Name</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-user">👤 User Input</span>
+        </div>
+        <div class="fpl-description">
+          Provided directly by the user as the primary identifier for the account.
+          Used as the starting point for all downstream research and matching.
+        </div>
+      </div>
 
-<div class="fpl-section-header">🔗 Corporate Hierarchy &amp; Ownership</div>
-<div class="fpl-grid">
+      <div class="fpl-card">
+        <div class="fpl-field-name">📜 Legal Name</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+        </div>
+        <div class="fpl-description">
+          AI (OpenAI gpt-4.1 with live web search) researches the company's full registered legal name.
+          Sources checked: company registries (Companies House, SEC EDGAR), regulatory filings,
+          Bloomberg, official corporate websites and annual reports.
+        </div>
+      </div>
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🏢 Ultimate Parent</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
-    </div>
-    <div class="fpl-description">
-      AI researches the full corporate ownership chain to identify the top-level holding entity.
-      Sources: annual reports, SEC filings, Companies House, regulatory databases, Bloomberg.
-      For publicly traded companies that are their own ultimate parent, the AI correctly
-      returns the listed entity rather than null.
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">🌍 Country</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-user">👤 User Input</span>
+        </div>
+        <div class="fpl-description">
+          The country of the account's headquarters is selected by the user from a
+          dropdown of 60+ countries. Used as the input to the Account Category matrix lookup
+          and as a contextual signal for all AI research.
+        </div>
+      </div>
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">🔗 Parent Account &amp; Reporting Group</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-sf">🔗 Salesforce Cross-ref</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Suggestion (fallback)</span>
-    </div>
-    <div class="fpl-description">
-      Cross-referenced against the uploaded Salesforce account list using
-      <strong>fuzzy matching (rapidfuzz)</strong> with normalisation of legal suffixes
-      (Ltd, Inc, plc, GmbH, etc.). The Reporting Group is taken from the SF record whose
-      Ultimate Parent matches the AI-identified ultimate parent. If no SF match is found,
-      the AI suggests a friendly short name (e.g. "Barclays" for "Barclays Services Ltd").
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">🗺️ Region</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-matrix">📊 Country Mapping Table</span>
+        </div>
+        <div class="fpl-description">
+          Auto-derived from Country using a 60+ country mapping table (EMEA / APAC / AMER).
+          No user input required — the region is determined instantly from the selected country.
+          Also drives the Secondary Account Owner assignment rules.
+        </div>
+      </div>
 
-</div>
+    </div>
 
-<div class="fpl-section-header">👥 Account Ownership &amp; Financial Metrics</div>
-<div class="fpl-grid">
+    <div class="fpl-section-header">🏷️ Industry Classification</div>
+    <div class="fpl-grid">
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">👤 Secondary Account Owner</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
-    </div>
-    <div class="fpl-description">
-      Determined by a rules engine using <strong>Region + Account Category</strong>.
-      EMEA and UK/Ireland accounts are assigned to Elaine Zhang. APAC accounts to Vernis Tan.
-      AMER accounts: Category 1 → Elaine Zhang; other categories rotate monthly
-      between Joseph Cawley and Gabriel Simpatico (odd months vs even months).
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">🔍 Detailed Business Segment</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Classification</span>
+        </div>
+        <div class="fpl-description">
+          AI classifies the company into exactly <strong>one of 38 Detailed Business Segments</strong>
+          using live web research. The AI searches company websites, news, regulatory filings and
+          financial databases to understand the company's core business activities and select the
+          most appropriate segment.
+        </div>
+      </div>
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">💰 Annual Revenue</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
-    </div>
-    <div class="fpl-description">
-      AI web research prioritises the company's own investor relations pages and annual reports,
-      then regulatory filings, then major financial data providers (Bloomberg, Reuters, S&amp;P Global).
-      The most recent year available is always used (2024/2025 where possible).
-      Source URL is captured and displayed for verification.
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">📂 Business Segment</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
+        </div>
+        <div class="fpl-description">
+          Auto-derived from the Detailed Business Segment via a 3-level segment hierarchy table.
+          No AI inference required — the Business Segment is a deterministic roll-up from the
+          Detailed Segment (e.g. "Asset Management" → "Asset &amp; Wealth Mgmt.").
+        </div>
+      </div>
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">👥 Employees</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
-    </div>
-    <div class="fpl-description">
-      Full-time equivalent (FTE) headcount sourced from company reports, LinkedIn,
-      regulatory filings, or financial databases. AI cross-references multiple sources
-      and uses the most authoritative, most recent figure. Source URL is captured.
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">🏛️ Market Segment</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-matrix">📊 Hierarchy Lookup</span>
+        </div>
+        <div class="fpl-description">
+          Auto-derived from the Detailed Business Segment via the same 3-level hierarchy.
+          The Market Segment is the top-level grouping (Banks / Asset Mgmt. / Corporates / Fintech /
+          Full-Service Banks / Other) and drives the Customer Segment threshold logic.
+        </div>
+      </div>
 
-  <div class="fpl-card">
-    <div class="fpl-field-name">📈 AUM (Assets Under Management)</div>
-    <div class="fpl-badges">
-      <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
-      <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
-    </div>
-    <div class="fpl-description">
-      Assets Under Management — relevant for banks, asset managers, hedge funds, pension funds,
-      insurance companies and similar. For companies where AUM is not applicable (e.g. Fintechs,
-      Corporates), the AI correctly returns "N/A". Source URL is captured for validation.
-    </div>
-  </div>
+      <div class="fpl-card">
+        <div class="fpl-field-name">📝 Industry Classification Rationale</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-ai">🤖 AI Explanation</span>
+        </div>
+        <div class="fpl-description">
+          AI generates a 1–2 sentence explanation of <em>why</em> the chosen Detailed Business Segment
+          was selected. This provides transparency and allows users to verify or override the
+          AI's classification reasoning.
+        </div>
+      </div>
 
-</div>
-""", unsafe_allow_html=True)
+    </div>
 
-    st.markdown("---")
-    st.info("""
-**ℹ️ Data Freshness:** The system always attempts live web search via OpenAI gpt-4.1 (Responses API with web_search tool).
-If the live search fails, it retries up to 2 times before falling back to the model's training data.
-When training data is used, a prominent warning is shown and figures are annotated as potentially outdated.
-""")
+    <div class="fpl-section-header">💹 Customer Segmentation</div>
+    <div class="fpl-grid">
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">📊 Customer Segment</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
+          <span class="fpl-source-badge badge-web">🌐 Live Web Data</span>
+        </div>
+        <div class="fpl-description">
+          A rules engine evaluates AUM, Annual Revenue, and Employees against
+          market-segment-specific thresholds. <strong>"Highest tier wins"</strong> — any single metric
+          reaching Enterprise level classifies the account as Enterprise.
+          G-SIB/D-SIB banks get special handling: they are automatically Enterprise
+          without relying on financial metrics.
+        </div>
+      </div>
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">🗂️ Account Category</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-matrix">📊 Excel Matrix Lookup</span>
+        </div>
+        <div class="fpl-description">
+          A matrix lookup using <strong>Country × Customer Segment × Business Segment</strong>
+          against an Excel-based matrix covering 60+ countries. Returns Category 1, 2, or 3,
+          which drives commercial prioritisation. No AI involved — this is a pure
+          deterministic lookup against the approved business rules matrix.
+        </div>
+      </div>
+
+    </div>
+
+    <div class="fpl-section-header">🔗 Corporate Hierarchy &amp; Ownership</div>
+    <div class="fpl-grid">
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">🏢 Ultimate Parent</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+        </div>
+        <div class="fpl-description">
+          AI researches the full corporate ownership chain to identify the top-level holding entity.
+          Sources: annual reports, SEC filings, Companies House, regulatory databases, Bloomberg.
+          For publicly traded companies that are their own ultimate parent, the AI correctly
+          returns the listed entity rather than null.
+        </div>
+      </div>
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">🔗 Parent Account &amp; Reporting Group</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-sf">🔗 Salesforce Cross-ref</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Suggestion (fallback)</span>
+        </div>
+        <div class="fpl-description">
+          Cross-referenced against the uploaded Salesforce account list using
+          <strong>fuzzy matching (rapidfuzz)</strong> with normalisation of legal suffixes
+          (Ltd, Inc, plc, GmbH, etc.). The Reporting Group is taken from the SF record whose
+          Ultimate Parent matches the AI-identified ultimate parent. If no SF match is found,
+          the AI suggests a friendly short name (e.g. "Barclays" for "Barclays Services Ltd").
+        </div>
+      </div>
+
+    </div>
+
+    <div class="fpl-section-header">👥 Account Ownership &amp; Financial Metrics</div>
+    <div class="fpl-grid">
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">👤 Secondary Account Owner</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-rules">📊 Rules Engine</span>
+        </div>
+        <div class="fpl-description">
+          Determined by a rules engine using <strong>Region + Account Category</strong>.
+          EMEA and UK/Ireland accounts are assigned to Elaine Zhang. APAC accounts to Vernis Tan.
+          AMER accounts: Category 1 → Elaine Zhang; other categories rotate monthly
+          between Joseph Cawley and Gabriel Simpatico (odd months vs even months).
+        </div>
+      </div>
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">💰 Annual Revenue</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+        </div>
+        <div class="fpl-description">
+          AI web research prioritises the company's own investor relations pages and annual reports,
+          then regulatory filings, then major financial data providers (Bloomberg, Reuters, S&amp;P Global).
+          The most recent year available is always used (2024/2025 where possible).
+          Source URL is captured and displayed for verification.
+        </div>
+      </div>
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">👥 Employees</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+        </div>
+        <div class="fpl-description">
+          Full-time equivalent (FTE) headcount sourced from company reports, LinkedIn,
+          regulatory filings, or financial databases. AI cross-references multiple sources
+          and uses the most authoritative, most recent figure. Source URL is captured.
+        </div>
+      </div>
+
+      <div class="fpl-card">
+        <div class="fpl-field-name">📈 AUM (Assets Under Management)</div>
+        <div class="fpl-badges">
+          <span class="fpl-source-badge badge-web">🌐 Live Web Search</span>
+          <span class="fpl-source-badge badge-ai">🤖 AI Research</span>
+        </div>
+        <div class="fpl-description">
+          Assets Under Management — relevant for banks, asset managers, hedge funds, pension funds,
+          insurance companies and similar. For companies where AUM is not applicable (e.g. Fintechs,
+          Corporates), the AI correctly returns "N/A". Source URL is captured for validation.
+        </div>
+      </div>
+
+    </div>
+    """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.info("""
+    **ℹ️ Data Freshness:** The system always attempts live web search via OpenAI gpt-4.1 (Responses API with web_search tool).
+    If the live search fails, it retries up to 2 times before falling back to the model's training data.
+    When training data is used, a prominent warning is shown and figures are annotated as potentially outdated.
+    """)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown(f"""
