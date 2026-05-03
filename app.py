@@ -10,6 +10,8 @@ import re
 import difflib
 import json
 import textwrap
+import glob
+import os
 from html import escape as html_escape
 from openai import OpenAI
 import openai
@@ -565,7 +567,7 @@ st.markdown("""
         background: white;
         border-radius: 10px;
         border: 1px solid #dde8e8;
-        padding: 10px;
+        padding: 16px;
         margin-bottom: 10px;
         overflow-x: auto;
     }
@@ -576,8 +578,8 @@ st.markdown("""
         background: linear-gradient(90deg, #002E33 0%, #004a52 100%);
         color: #21CFB2;
         font-weight: 700;
-        font-size: 0.78rem;
-        padding: 4px 10px;
+        font-size: 0.95rem;
+        padding: 8px 14px;
         border-radius: 6px;
         margin-bottom: 6px;
         letter-spacing: 0.2px;
@@ -592,25 +594,25 @@ st.markdown("""
         background: #f0f9f8;
         border: 1px solid #21CFB2;
         border-radius: 6px;
-        overflow: hidden;
-        min-width: 140px;
-        max-width: 200px;
+        overflow: visible;
+        min-width: 180px;
+        max-width: 280px;
         flex: 1;
     }
     .seg-business-header {
         background: #21CFB2;
         color: #002E33;
         font-weight: 700;
-        font-size: 0.72rem;
-        padding: 3px 8px;
+        font-size: 0.85rem;
+        padding: 6px 10px;
     }
     .seg-detailed-list {
-        padding: 3px 8px;
+        padding: 6px 10px;
     }
     .seg-detailed-item {
-        font-size: 0.7rem;
+        font-size: 0.82rem;
         color: #002E33;
-        padding: 1px 0;
+        padding: 3px 0;
         border-bottom: 1px solid rgba(33,207,178,0.12);
         line-height: 1.3;
     }
@@ -780,6 +782,13 @@ st.markdown(f"""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# Gear icon — admin settings toggle (top-right corner)
+_header_cols = st.columns([0.95, 0.05])
+with _header_cols[1]:
+    if st.button("⚙️", key="admin_gear", help="Admin Settings"):
+        st.session_state["show_admin"] = not st.session_state.get("show_admin", False)
+        st.rerun()
 
 # -----------------------------------------------
 # LOAD SEGMENT HIERARCHY FROM EXCEL (with fallback)
@@ -1003,16 +1012,57 @@ DSIB_FLAT = [name for names in DSIB_LIST.values() for name in names]
 # -----------------------------------------------
 st.sidebar.markdown("### Account Intelligence")
 st.sidebar.markdown("---")
+
+@st.cache_data
+def load_salesforce_accounts():
+    """Auto-load the most recent salesforce_accounts_dd_mm_yyyy.csv from the repo root."""
+    pattern = "salesforce_accounts_*.csv"
+    files = glob.glob(pattern)
+    if not files:
+        return None, None, "No Salesforce accounts file found (expected: salesforce_accounts_dd_mm_yyyy.csv)"
+
+    # Parse dates from filenames and pick most recent
+    dated_files = []
+    for f in files:
+        basename = os.path.basename(f)
+        match = re.search(r'salesforce_accounts_(\d{2})_(\d{2})_(\d{4})\.csv', basename)
+        if match:
+            day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            try:
+                file_date = datetime(year, month, day)
+                dated_files.append((file_date, f))
+            except ValueError:
+                continue
+
+    if not dated_files:
+        # Try loading any salesforce_accounts file
+        try:
+            df = pd.read_csv(files[0])
+            return df, None, None
+        except Exception as e:
+            return None, None, f"Error reading {files[0]}: {e}"
+
+    # Sort by date descending, pick newest
+    dated_files.sort(key=lambda x: x[0], reverse=True)
+    newest_date, newest_file = dated_files[0]
+
+    try:
+        df = pd.read_csv(newest_file)
+        return df, newest_date, None
+    except Exception as e:
+        return None, None, f"Error reading {newest_file}: {e}"
+
+sf_accounts, _sf_refresh_date, _sf_load_error = load_salesforce_accounts()
+
 st.sidebar.markdown("**📂 Salesforce Account List**")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload Salesforce Accounts CSV",
-    type=["csv"],
-    help="Maximum recommended file size: 10 MB",
-)
-sf_accounts = None
-if uploaded_file:
-    sf_accounts = pd.read_csv(uploaded_file)
+if _sf_load_error:
+    st.sidebar.warning(_sf_load_error)
+elif sf_accounts is not None:
     st.sidebar.success(f"✅ Loaded {len(sf_accounts)} accounts")
+    if _sf_refresh_date:
+        st.sidebar.markdown(f"📅 **Last Refresh:** {_sf_refresh_date.strftime('%d/%m/%Y')}")
+else:
+    st.sidebar.warning("No Salesforce accounts file found")
 
 # -----------------------------------------------
 # LOAD ACCOUNT CATEGORY MATRIX
@@ -1051,6 +1101,10 @@ def load_account_category_matrix():
                 val = df_v2.loc[country, col]
                 if pd.notna(val) and str(val).strip():
                     lookup_v2[(country_clean, col_clean.lower())] = str(val).strip()
+                    # Also store a version with hyphens normalized (hyphens → space, extra spaces collapsed)
+                    col_no_hyphen = re.sub(r'\s+', ' ', col_clean.lower().replace('-', ' ')).strip()
+                    if col_no_hyphen != col_clean.lower():
+                        lookup_v2[(country_clean, col_no_hyphen)] = str(val).strip()
         if lookup_v2:
             return lookup_v2, None
         _v2_err = "account_category_matrix v2.xlsx loaded but contains no valid entries"
@@ -1762,25 +1816,49 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
         # v2 format: lookup key = (country, customer_segment + business_segment) — no space
         cs_norm = str(customer_segment).strip().lower()
         bs_norm = str(business_segment).strip().lower()
-        concat_key = cs_norm + bs_norm
-        lookup_key = (matched_country, concat_key)
-        if lookup_key in matrix_lookup:
-            return matrix_lookup[lookup_key], f"Matched (v2): {matched_country.title()} | {customer_segment} | {business_segment}"
+
+        # Try multiple key formats since matrix columns may vary
+        candidates = [
+            cs_norm + bs_norm,                           # customer_segment + business_segment
+            bs_norm + cs_norm,                           # business_segment + customer_segment (reverse)
+            (cs_norm + bs_norm).replace('-', ' '),       # no hyphens (cs + bs)
+            (bs_norm + cs_norm).replace('-', ' '),       # reverse, no hyphens
+            (cs_norm + bs_norm).replace('-', ''),        # hyphens removed entirely (cs + bs)
+            (bs_norm + cs_norm).replace('-', ''),        # reverse, hyphens removed
+        ]
+        # De-duplicate while preserving order
+        _seen = set()
+        candidates = [c for c in candidates if c not in _seen and not _seen.add(c)]
+
+        for concat_key in candidates:
+            lookup_key = (matched_country, concat_key)
+            if lookup_key in matrix_lookup:
+                return matrix_lookup[lookup_key], f"Matched (v2): {matched_country.title()} | {customer_segment} | {business_segment}"
+
         # Normalized fallback: strip hyphens/spaces and try singular/plural variants
         _available_keys = {k[1] for k in matrix_lookup if k[0] == matched_country}
         def _strip_norm(s):
             return s.replace('-', '').replace(' ', '').rstrip('s')
-        _concat_stripped = _strip_norm(concat_key)
+        _primary_concat = cs_norm + bs_norm
+        _concat_stripped = _strip_norm(_primary_concat)
         for _ak in _available_keys:
             if _strip_norm(_ak) == _concat_stripped:
                 return matrix_lookup[(matched_country, _ak)], f"Matched (v2 normalized): {matched_country.title()} | {customer_segment} | {business_segment}"
+
+        # Fuzzy fallback: check similarity against available keys for this country
+        for _avail_key in _available_keys:
+            for concat_key in candidates[:6]:  # only check the non-plural variants
+                if (concat_key in _avail_key or _avail_key in concat_key or
+                        fuzz.ratio(concat_key, _avail_key) >= 85):
+                    return matrix_lookup[(matched_country, _avail_key)], f"Matched (v2 fuzzy): {matched_country.title()} | key='{_avail_key}'"
+
         # Diagnostic: show what keys are available for this country
         _available = sorted(_available_keys)
         return (
             "No match found",
             (
-                f"No v2 matrix entry for {matched_country.title()} + '{customer_segment}{business_segment}'. "
-                f"Available segment keys for this country: {_available[:8]}."
+                f"No v2 matrix entry for {matched_country.title()} + tried keys: {candidates[:4]}. "
+                f"Available segment keys for this country: {_available[:10]}."
             )
         )
     else:
@@ -2436,11 +2514,181 @@ def _user_has_permission(email, perm, cfg):
     return _u.get("permissions", {}).get(perm, False)
 
 # -----------------------------------------------
+# ADMIN PAGE (shown instead of tabs when gear icon clicked)
+# -----------------------------------------------
+if st.session_state.get("show_admin", False):
+    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Admin</span></div>', unsafe_allow_html=True)
+    st.markdown('<p class="fen-section-title">⚙️ Admin &amp; Permissions</p>', unsafe_allow_html=True)
+    if st.button("← Back to App", key="admin_back_btn"):
+        st.session_state["show_admin"] = False
+        st.rerun()
+
+    # Load config
+    _adm_cfg = _load_admin_config()
+
+    # ── Login prompt ─────────────────────────────────────────────────────
+    if "admin_current_user" not in st.session_state:
+        st.session_state["admin_current_user"] = ""
+
+    _adm_email_input = st.text_input(
+        "Your email address (to identify yourself)",
+        value=st.session_state["admin_current_user"],
+        placeholder="you@example.com",
+        key="admin_email_input",
+    )
+    if _adm_email_input != st.session_state["admin_current_user"]:
+        st.session_state["admin_current_user"] = _adm_email_input.strip().lower()
+        st.rerun()
+
+    _cur_user = st.session_state["admin_current_user"]
+    _cur_is_admin = _is_admin(_cur_user, _adm_cfg)
+
+    if not _cur_user:
+        st.info("Enter your email above to access the admin panel.")
+    elif not _cur_is_admin:
+        st.warning(f"🔒 **{_cur_user}** does not have admin access. Contact an administrator to request access.")
+    else:
+        st.success(f"✅ Logged in as admin: **{_cur_user}**")
+
+        # ── Section: User List ────────────────────────────────────────────
+        st.markdown("### 👥 User Management")
+
+        _users = _adm_cfg.get("users", {})
+        if not _users:
+            st.info("No users configured yet.")
+        else:
+            _user_rows = []
+            for _ue, _ud in _users.items():
+                _user_rows.append({
+                    "Email": _ue,
+                    "Name": _ud.get("name", ""),
+                    "Role": _ud.get("role", "user"),
+                    "Enabled": "✅" if _ud.get("enabled", True) else "❌",
+                    "Single Enrich": "✅" if _ud.get("permissions", {}).get("single_enrichment") else "❌",
+                    "Bulk Enrich":   "✅" if _ud.get("permissions", {}).get("bulk_enrichment") else "❌",
+                    "Lead Match":    "✅" if _ud.get("permissions", {}).get("lead_matching") else "❌",
+                    "Reference":     "✅" if _ud.get("permissions", {}).get("reference") else "❌",
+                    "Added By": _ud.get("added_by", ""),
+                    "Added Date": _ud.get("added_date", ""),
+                })
+            st.dataframe(pd.DataFrame(_user_rows), use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # ── Section: Edit / Toggle User ────────────────────────────────────
+        st.markdown("### ✏️ Edit User Permissions")
+        if _users:
+            _edit_email = st.selectbox("Select user to edit", options=list(_users.keys()), key="adm_edit_sel")
+            if _edit_email:
+                _eu = _users[_edit_email]
+                _ec1, _ec2, _ec3 = st.columns(3)
+                with _ec1:
+                    _new_role    = st.selectbox("Role", ["user", "admin"], index=0 if _eu.get("role","user") == "user" else 1, key="adm_role")
+                    _new_enabled = st.checkbox("Account enabled", value=_eu.get("enabled", True), key="adm_enabled")
+                with _ec2:
+                    _p_single = st.checkbox("Single Enrichment", value=_eu.get("permissions",{}).get("single_enrichment", True), key="adm_p_single")
+                    _p_bulk   = st.checkbox("Bulk Enrichment",   value=_eu.get("permissions",{}).get("bulk_enrichment", True),   key="adm_p_bulk")
+                with _ec3:
+                    _p_lead   = st.checkbox("Lead Matching",     value=_eu.get("permissions",{}).get("lead_matching", True),     key="adm_p_lead")
+                    _p_ref    = st.checkbox("Reference",         value=_eu.get("permissions",{}).get("reference", True),         key="adm_p_ref")
+
+                if st.button("💾 Save Changes", key="adm_save_btn"):
+                    _adm_cfg["users"][_edit_email]["role"] = _new_role
+                    _adm_cfg["users"][_edit_email]["enabled"] = _new_enabled
+                    _adm_cfg["users"][_edit_email]["permissions"] = {
+                        "single_enrichment": _p_single,
+                        "bulk_enrichment":   _p_bulk,
+                        "lead_matching":     _p_lead,
+                        "reference":         _p_ref,
+                        "admin":             _new_role == "admin",
+                    }
+                    if _new_role == "admin" and _edit_email not in _adm_cfg.get("admins", []):
+                        _adm_cfg.setdefault("admins", []).append(_edit_email)
+                    elif _new_role != "admin" and _edit_email in _adm_cfg.get("admins", []):
+                        _adm_cfg["admins"].remove(_edit_email)
+                    _save_admin_config(_adm_cfg)
+                    st.success(f"✅ Permissions updated for {_edit_email}")
+                    st.rerun()
+
+                if st.button("🗑️ Remove User", type="secondary", key="adm_del_btn"):
+                    _adm_cfg["users"].pop(_edit_email, None)
+                    if _edit_email in _adm_cfg.get("admins", []):
+                        _adm_cfg["admins"].remove(_edit_email)
+                    _save_admin_config(_adm_cfg)
+                    st.warning(f"User {_edit_email} removed.")
+                    st.rerun()
+
+        st.divider()
+
+        # ── Section: Add New User ─────────────────────────────────────────
+        st.markdown("### ➕ Add New User")
+        with st.form("adm_add_user_form"):
+            _new_email   = st.text_input("Email *", placeholder="user@company.com")
+            _new_name    = st.text_input("Full Name", placeholder="Jane Smith")
+            _new_role2   = st.selectbox("Role", ["user", "admin"])
+            st.markdown("**Default Permissions**")
+            _c1, _c2 = st.columns(2)
+            with _c1:
+                _np_single = st.checkbox("Single Enrichment", value=True, key="np_single")
+                _np_bulk   = st.checkbox("Bulk Enrichment",   value=True, key="np_bulk")
+            with _c2:
+                _np_lead   = st.checkbox("Lead Matching",     value=True, key="np_lead")
+                _np_ref    = st.checkbox("Reference",         value=True, key="np_ref")
+            _submitted = st.form_submit_button("Add User")
+
+        if _submitted:
+            if not _new_email or "@" not in _new_email:
+                st.error("Please enter a valid email address.")
+            else:
+                _ne = _new_email.strip().lower()
+                if _ne in _adm_cfg.get("users", {}):
+                    st.warning(f"{_ne} already exists. Use 'Edit User Permissions' to modify.")
+                else:
+                    _adm_cfg.setdefault("users", {})[_ne] = {
+                        "name": _new_name.strip(),
+                        "role": _new_role2,
+                        "enabled": True,
+                        "permissions": {
+                            "single_enrichment": _np_single,
+                            "bulk_enrichment":   _np_bulk,
+                            "lead_matching":     _np_lead,
+                            "reference":         _np_ref,
+                            "admin":             _new_role2 == "admin",
+                        },
+                        "added_by":   _cur_user,
+                        "added_date": datetime.now().strftime("%Y-%m-%d"),
+                    }
+                    if _new_role2 == "admin":
+                        _adm_cfg.setdefault("admins", []).append(_ne)
+                    _save_admin_config(_adm_cfg)
+                    st.success(f"✅ User **{_ne}** added successfully.")
+
+                    # Show notification template (no live SMTP configured)
+                    _app_url = (
+                        st.secrets.get("APP_URL", "https://your-app-url.streamlit.app")
+                        if hasattr(st, "secrets") else "https://your-app-url.streamlit.app"
+                    )
+                    st.info(
+                        f"📧 **Email notification to send to {_ne}:**\n\n"
+                        f"Subject: You've been added to Fenergo Account Intelligence\n\n"
+                        f"Hi {_new_name or _ne},\n\n"
+                        f"You have been granted access to the Fenergo Account Intelligence platform.\n"
+                        f"Click the link below to access the tool:\n\n"
+                        f"**{_app_url}**\n\n"
+                        f"Your role: {_new_role2}\n\n"
+                        f"*(To enable automatic email delivery, configure SMTP settings in Streamlit secrets "
+                        f"under `[smtp]` — host, port, username, password.)*"
+                    )
+                    st.rerun()
+
+    st.stop()
+
+# -----------------------------------------------
 # TABS
 # -----------------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "Single Account Enrichment", "Bulk Account Enrichment", "Lead Matching",
-    "Reference & Process Overview", "⚙️ Admin"
+    "Reference & Process Overview"
 ])
 
 # ===============================================
@@ -2506,8 +2754,8 @@ with tab1:
 
         if sf_accounts is None:
             st.error(
-                "⚠️ **No Salesforce Account list uploaded.** Please upload the Salesforce Accounts CSV "
-                "using the sidebar uploader before running enrichment checks. "
+                "⚠️ **No Salesforce Account list found.** Please ensure a file named "
+                "`salesforce_accounts_dd_mm_yyyy.csv` exists in the repository root. "
                 "This is required to perform the duplicate check."
             )
             st.stop()
@@ -2518,7 +2766,7 @@ with tab1:
             "country": t1_country,
             "region": t1_region,
         }
-        st.session_state["tab1_dup_results"] = run_fuzzy_dup_check(sf_accounts, account_name)
+        st.session_state["tab1_dup_results"] = run_fuzzy_dup_check(sf_accounts, account_name, min_score=70)
         st.session_state["tab1_phase"] = "dup_check"
         st.session_state["tab1_research"] = None
         st.session_state["tab1_segmentation"] = None
@@ -2811,25 +3059,20 @@ with tab1:
                     else _aum_raw
                 )
 
-                # Section 2 — Supplementary Account Information (3 rows + rationale row)
+                # Section 2 — Supplementary Account Information (3 rows)
                 _s2_rows = [
                     (_sf_field("Legal Name (BvD)",   _research.get('legal_name', '')),
                      _sf_field("Annual Revenue",     _research.get('annual_revenue_eur', ''),
                                source_url=_llm_sources.get('revenue_source'))),
-                    (_sf_field("Employees",          _research.get('employees', ''),
-                               source_url=_llm_sources.get('employees_source')),
-                     _sf_field("Ultimate Parent",    _research.get('ultimate_parent', ''))),
-                    (_sf_field("AUM (EUR)",          _aum_display,
-                               source_url=_llm_sources.get('aum_source')),
-                     _sf_field("", "")),
+                    (_sf_field("Ultimate Parent",    _research.get('ultimate_parent', '')),
+                     _sf_field("Employees",          _research.get('employees', ''),
+                               source_url=_llm_sources.get('employees_source'))),
+                    (_sf_field("Industry Classification Rationale",
+                              _research.get('industry_classification_rationale', '')),
+                     _sf_field("AUM (EUR)",          _aum_display,
+                               source_url=_llm_sources.get('aum_source'))),
                 ]
                 _s2_cells = "".join(left_cell + right_cell for left_cell, right_cell in _s2_rows)
-                # Industry Classification Rationale spans left column only
-                _s2_cells += (
-                    _sf_field("Industry Classification Rationale",
-                              _research.get('industry_classification_rationale', ''))
-                    + '<div class="sf-field"></div>'
-                )
 
                 st.markdown(f"""
 <div class="sf-layout">
@@ -3552,7 +3795,7 @@ with tab3:
     )
 
     if sf_accounts is None:
-        st.warning("⚠️ Please upload a Salesforce account list via the sidebar before using Lead Matching.")
+        st.warning("⚠️ No Salesforce Account list found. Please ensure a `salesforce_accounts_dd_mm_yyyy.csv` file exists in the repository root.")
     else:
         _lm_upload = st.file_uploader(
             "Upload Leads Excel (.xlsx)",
@@ -3717,114 +3960,65 @@ the overall data flow, customer segment logic, segmentation hierarchy, and field
 
     # ── Overall Data Flow Diagram ─────────────────────────────────────────────
     st.markdown('<p class="fen-section-title">📊 Overall Data Flow</p>', unsafe_allow_html=True)
-    st.markdown("""
-<div class="flow-outer">
-<div style="font-size:0.82rem;color:#5a7a7a;margin-bottom:16px;">
-This diagram shows how each data attribute is sourced and how they flow into the <strong>Account Category</strong> — the central output of the enrichment pipeline.
+    st.markdown("""<div class="flow-outer">
+<div style="font-size:0.82rem;color:#5a7a7a;margin-bottom:20px;">
+This diagram shows how each data attribute flows into the <strong>Account Category</strong> — the central output of the enrichment pipeline.
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 36px 1fr 36px 1fr 36px 1fr;gap:6px;align-items:center;margin-bottom:20px;">
+<div style="display:grid;grid-template-columns:160px 44px 160px 44px 160px 44px 160px;grid-template-rows:auto 28px auto 28px auto;gap:0 6px;align-items:center;justify-items:center;">
 
-  <!-- Left column: Revenue/AUM/Employees inputs -->
-  <div style="display:flex;flex-direction:column;gap:8px;">
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">🌐 Revenue (AI Web Research)</div>
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">🌐 AUM (AI Web Research)</div>
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">🌐 Employees (AI Web Research)</div>
+  <!-- Row 1: Market Segment above Business Segment (col 7) -->
+  <div style="grid-column:7;grid-row:1;">
+    <div class="flow-box" style="background:#fff3cd;border-color:#856404;color:#002E33;">📊 Market Segment</div>
   </div>
 
-  <!-- Arrow → Customer Segment -->
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">→</div>
+  <!-- Row 2: Arrows col 5 (Country up) and col 7 (Market down) -->
+  <div style="grid-column:5;grid-row:2;font-size:1.2rem;color:#21CFB2;font-weight:700;">↑</div>
+  <div style="grid-column:7;grid-row:2;font-size:1.2rem;color:#21CFB2;font-weight:700;">↓</div>
 
-  <!-- Customer Segment -->
-  <div style="text-align:center;">
-    <div class="flow-box" style="background:#fff3cd;border-color:#856404;color:#002E33;min-width:0;">📊 Customer Segment<br><span style="font-size:0.7rem;font-weight:400;">(Enterprise / Mid-Market / Scale-up)</span></div>
+  <!-- Row 3: Main flow -->
+  <div style="grid-column:1;grid-row:3;display:flex;flex-direction:column;gap:8px;width:100%;">
+    <div class="flow-box" style="background:#e8f7f5;width:100%;box-sizing:border-box;">🌐 Revenue</div>
+    <div class="flow-box" style="background:#e8f7f5;width:100%;box-sizing:border-box;">🌐 Employees</div>
+    <div class="flow-box" style="background:#e8f7f5;width:100%;box-sizing:border-box;">🌐 AUM</div>
+  </div>
+  <div style="grid-column:2;grid-row:3;font-size:1.3rem;color:#21CFB2;font-weight:700;">→</div>
+  <div style="grid-column:3;grid-row:3;">
+    <div class="flow-box" style="background:#e74c3c;border-color:#c0392b;color:#fff;width:100%;box-sizing:border-box;">📊 Customer Segment<br><span style="font-size:0.7rem;font-weight:400;">(Enterprise / Mid-Market / Scale-up)</span></div>
+  </div>
+  <div style="grid-column:4;grid-row:3;font-size:1.3rem;color:#21CFB2;font-weight:700;">→</div>
+  <div style="grid-column:5;grid-row:3;">
+    <div style="background:#c0392b;border:3px solid #922b21;border-radius:50%;padding:18px 14px;text-align:center;font-size:0.88rem;font-weight:800;color:#fff;width:140px;height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;">🗂️ ACCOUNT CATEGORY<br><span style="font-size:0.7rem;font-weight:400;">(Cat 1 / 2 / 3)</span></div>
+  </div>
+  <div style="grid-column:6;grid-row:3;font-size:1.3rem;color:#21CFB2;font-weight:700;">←</div>
+  <div style="grid-column:7;grid-row:3;">
+    <div class="flow-box" style="background:#fff3cd;border-color:#856404;color:#002E33;width:100%;box-sizing:border-box;">📂 Business Segment</div>
   </div>
 
-  <!-- Arrow → Account Category -->
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">→</div>
+  <!-- Row 4: Vertical arrows for Country↑ and Detailed BS↑ -->
+  <div style="grid-column:5;grid-row:4;font-size:1.2rem;color:#21CFB2;font-weight:700;">↑</div>
+  <div style="grid-column:7;grid-row:4;font-size:1.2rem;color:#21CFB2;font-weight:700;">↑</div>
 
-  <!-- CENTRAL: Account Category -->
-  <div style="text-align:center;">
-    <div class="flow-box-centre" style="min-width:0;">🗂️ Account Category<br><span style="font-size:0.72rem;font-weight:400;">(Cat 1 / 2 / 3)</span></div>
-    <div class="flow-note" style="margin-top:6px;">Central output of the enrichment pipeline</div>
+  <!-- Row 5: Country below Account Category, Detailed BS below Business Segment -->
+  <div style="grid-column:5;grid-row:5;">
+    <div class="flow-box" style="background:#fff3cd;border-color:#856404;color:#002E33;">👤 Country</div>
   </div>
-
-  <!-- Arrow ← Business Segment -->
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">←</div>
-
-  <!-- Right: Business/Market Segment -->
-  <div style="display:flex;flex-direction:column;gap:8px;">
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">📊 Market Segment<br><span style="font-size:0.7rem;font-weight:400;">(from mapping table)</span></div>
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">📂 Business Segment<br><span style="font-size:0.7rem;font-weight:400;">(from mapping table)</span></div>
-  </div>
-
-</div>
-
-<!-- Second row: Detailed Business Segment feeds right column -->
-<div style="display:grid;grid-template-columns:1fr 36px 1fr 36px 1fr 36px 1fr;gap:6px;align-items:center;margin-bottom:20px;">
-
-  <!-- Left: Country input -->
-  <div style="display:flex;flex-direction:column;gap:6px;">
-    <div class="flow-box" style="background:#ede9fe;border-color:#7c3aed;color:#4c1d95;min-width:0;">👤 Country<br><span style="font-size:0.7rem;font-weight:400;">(user input)</span></div>
-    <div style="margin-left:12px;display:flex;flex-direction:column;gap:4px;">
-      <div style="color:#21CFB2;font-size:0.8rem;">↓ spin-off</div>
-      <div class="flow-box" style="font-size:0.75rem;background:#d1fae5;border-color:#065f46;color:#065f46;min-width:0;">👥 Secondary Account Owner<br><span style="font-size:0.68rem;">(from country mapping table)</span></div>
-    </div>
-  </div>
-
-  <!-- Arrow → Account Category (from Country) -->
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">→</div>
-
-  <!-- Spacer to align with Account Category column -->
-  <div></div>
-  <div></div>
-
-  <!-- Account Category column (empty here — already shown above) -->
-  <div style="text-align:center;font-size:0.78rem;color:#5a7a7a;">↑ Country also feeds<br>Account Category lookup</div>
-
-  <!-- Arrow ← Detailed Business Segment -->
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">←</div>
-
-  <!-- Right: Detailed Business Segment -->
-  <div style="display:flex;flex-direction:column;gap:6px;">
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">🌐 Detailed Business Segment<br><span style="font-size:0.7rem;font-weight:400;">(AI Web Research)</span></div>
-    <div style="margin-left:12px;display:flex;flex-direction:column;gap:4px;">
-      <div style="color:#21CFB2;font-size:0.8rem;">↓ spin-off</div>
-      <div class="flow-box" style="font-size:0.75rem;background:#ede9fe;border-color:#7c3aed;color:#4c1d95;min-width:0;">🤖 Industry Classification<br>Rationale</div>
-    </div>
+  <div style="grid-column:7;grid-row:5;">
+    <div class="flow-box" style="background:#e8f7f5;">🌐 Detailed Business Segment</div>
   </div>
 
 </div>
 
-<!-- Third row: Customer Name → Ultimate Parent → Reporting Group / SF Parent -->
-<div style="display:grid;grid-template-columns:1fr 36px 1fr 36px 1fr;gap:6px;align-items:center;margin-bottom:16px;">
-  <div>
-    <div class="flow-box" style="background:#ede9fe;border-color:#7c3aed;color:#4c1d95;min-width:0;">👤 Customer Name<br><span style="font-size:0.7rem;font-weight:400;">(user input)</span></div>
-  </div>
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">→</div>
-  <div>
-    <div class="flow-box" style="background:#e8f7f5;min-width:0;">🌐 Ultimate Parent<br><span style="font-size:0.7rem;font-weight:400;">(AI Web Research)</span></div>
-  </div>
-  <div style="text-align:center;font-size:1.1rem;color:#21CFB2;">→</div>
-  <div style="display:flex;flex-direction:column;gap:6px;">
-    <div class="flow-box" style="background:#d1fae5;border-color:#065f46;color:#065f46;font-size:0.75rem;min-width:0;">📋 Reporting Group<br><span style="font-size:0.68rem;">(SF cross-ref or AI suggestion)</span></div>
-    <div class="flow-box" style="background:#d1fae5;border-color:#065f46;color:#065f46;font-size:0.75rem;min-width:0;">🔗 Salesforce Parent Name<br><span style="font-size:0.68rem;">(SF cross-ref)</span></div>
-  </div>
-</div>
-
-<div style="margin-top:12px;padding:10px 14px;background:#f0f9f8;border-radius:8px;font-size:0.78rem;color:#002E33;border-left:3px solid #21CFB2;">
-  <strong>ℹ️ About AI Web Research fields:</strong> All 🌐 fields use OpenAI gpt-4.1 with live web search via the Responses API.
-  Revenue, AUM, and Employees are <em>extracted data points</em> (the AI finds a specific figure).
-  Detailed Business Segment is an <em>AI classification</em> (the AI researches the company, then selects the best-fit category from Fenergo's predefined segment list).
+<div style="margin-top:18px;padding:10px 14px;background:#f0f9f8;border-radius:8px;font-size:0.78rem;color:#002E33;border-left:3px solid #21CFB2;">
+  <strong>ℹ️ All 🌐 fields</strong> use OpenAI gpt-4.1 with live web search. Revenue, AUM, and Employees are <em>extracted data points</em>; Detailed Business Segment is an <em>AI classification</em>.
 </div>
 
 <div style="margin-top:10px;padding:10px 14px;background:#f8f8f8;border-radius:8px;font-size:0.78rem;color:#002E33;border-left:3px solid #ccc;">
   <strong>Legend:</strong>
   &nbsp; <span style="background:#e8f7f5;border:1px solid #21CFB2;padding:1px 6px;border-radius:4px;">🌐 AI Web Research</span>
+  &nbsp; <span style="background:#fff3cd;border:1px solid #856404;padding:1px 6px;border-radius:4px;color:#856404;">📊 Rules / Matrix</span>
+  &nbsp; <span style="background:#c0392b;border:1px solid #922b21;padding:1px 6px;border-radius:4px;color:#fff;">🗂️ Central Output (circle)</span>
   &nbsp; <span style="background:#ede9fe;border:1px solid #7c3aed;padding:1px 6px;border-radius:4px;color:#4c1d95;">👤 User Input</span>
-  &nbsp; <span style="background:#d1fae5;border:1px solid #065f46;padding:1px 6px;border-radius:4px;color:#065f46;">🔗 SF Cross-ref</span>
-  &nbsp; <span style="background:#fef3c7;border:1px solid #856404;padding:1px 6px;border-radius:4px;color:#856404;">📊 Rules / Matrix</span>
-  &nbsp; <span style="background:#fff0f0;border:1px solid #dc2626;padding:1px 6px;border-radius:4px;color:#dc2626;">🗂️ Central Output</span>
 </div>
 </div>
 """, unsafe_allow_html=True)
@@ -3842,10 +4036,10 @@ This diagram shows how each data attribute is sourced and how they flow into the
 
         st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Customer Segment Logic</span></div>', unsafe_allow_html=True)
         st.markdown('<p class="fen-section-title">Customer Segment Logic</p>', unsafe_allow_html=True)
-        st.markdown("""
+        st.markdown(textwrap.dedent("""
     This tab explains how the **Customer Segment** (Enterprise / Mid-Market / Scale-up) is derived for each account.
     The classification is based on the account's **Market Segment** combined with key financial metrics.
-    """)
+    """).strip())
 
         # Visual flowchart diagram
         st.markdown(textwrap.dedent("""
@@ -3854,6 +4048,7 @@ This diagram shows how each data attribute is sourced and how they flow into the
         ⭐ &nbsp;HIGHEST TIER WINS &nbsp;—&nbsp; any single metric reaching the Enterprise threshold classifies the account as Enterprise, regardless of other metrics.
         &nbsp;&nbsp;|&nbsp;&nbsp; ❓ All metrics unknown → defaults to <strong>Scale-up</strong>
       </div>
+
 
       <div class="fc-segments-grid">
 
@@ -4040,11 +4235,11 @@ This diagram shows how each data attribute is sourced and how they flow into the
         </div>
       </div>
     </div>
-    """), unsafe_allow_html=True)
+    """).strip(), unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 🏦 Full-Service Banks — Special Classification Logic")
-        st.markdown("""
+        st.markdown(textwrap.dedent("""
     Full-Service Banks follow a distinct classification path:
 
     | Designation | How classified | Notes |
@@ -4054,29 +4249,29 @@ This diagram shows how each data attribute is sourced and how they flow into the
     | **Neither G-SIB nor D-SIB** | Falls back to **Banks** thresholds | AUM / Revenue / Employees thresholds for "Banks" are applied as normal. |
 
     > ⚠️ The D-SIB list is maintained in the application code and should be kept up to date. D-SIB designations can change — always verify with the relevant local regulator.
-    """)
+    """).strip())
 
         st.markdown("---")
         st.markdown("### 📝 Notes")
-        st.markdown("""
+        st.markdown(textwrap.dedent("""
     - **AUM** (Assets Under Management) is primarily relevant for Banks and Asset Management firms. For Corporates and Fintechs, it is typically N/A.
     - **Revenue** figures should be in EUR billions (€bn). The LLM converts values from other currencies automatically.
     - **Employees** refers to full-time equivalent (FTE) headcount.
     - When both Revenue and Employees are known, **either one** can independently trigger Enterprise or Mid-Market — the highest tier wins.
     - The "Other / Default" thresholds apply to any Market Segment not explicitly listed above (e.g. Other, Precious Metals, Legal Services, etc.).
-    """)
+    """).strip())
 
     with ref_tab2:
         st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Fenergo Segmentation</span></div>', unsafe_allow_html=True)
         st.markdown('<p class="fen-section-title">Fenergo Segmentation Hierarchy</p>', unsafe_allow_html=True)
-        st.markdown("""
+        st.markdown(textwrap.dedent("""
     This tab shows the full **three-level segmentation hierarchy** used by Fenergo.
     Every account is classified across three levels:
 
     > **Market Segment** → **Business Segment** → **Detailed Business Segment**
 
     The Detailed Business Segment drives the **Customer Segment**, **Account Category**, and **Secondary Account Owner** assignments.
-    """)
+    """).strip())
 
         # Build a grouped structure from SEGMENT_HIERARCHY
         _hier_dict = {}
@@ -4134,12 +4329,6 @@ This diagram shows how each data attribute is sourced and how they flow into the
                 _tree_parts.append(_render_bs_card(_bs, _banks_bs[_bs]))
         _tree_parts.append('</div>')
         _tree_parts.append('</div>')  # inner grid
-        _tree_parts.append(
-            '<div style="margin:8px 0 0 0;padding:10px 14px;background:#f0f9f8;border-left:3px solid #21CFB2;'
-            'border-radius:0 6px 6px 0;font-size:0.81rem;color:#002E33;">'
-            '<strong>⚠️ Special logic:</strong> Full-Service Banks require G-SIB or D-SIB designation for Enterprise. '
-            'Without it, standard Banks thresholds apply.</div>'
-        )
         _tree_parts.append('</div>')  # Banks section
 
         _tree_parts.append('</div>')  # Row 1 grid
@@ -4160,13 +4349,13 @@ This diagram shows how each data attribute is sourced and how they flow into the
 
         st.markdown("---")
         st.markdown("### 📝 Notes")
-        st.markdown("""
+        st.markdown(textwrap.dedent("""
     - The **Detailed Business Segment** is the most granular classification — it is what the LLM assigns based on the company's industry and activities.
     - The **Business Segment** is the mid-level grouping (e.g. "Asset & Wealth Mgmt." groups together Asset Management, Hedge Funds, Pension Funds, etc.).
     - The **Market Segment** is the top-level grouping that drives the Customer Segment thresholds (see the **Customer Segment Logic** tab).
     - These three levels are used together to determine the **Account Category** (via the account category matrix) and the **Secondary Account Owner**.
     - The G-SIB and D-SIB lists (`GSIB_LIST` and `DSIB_LIST`) are maintained in the application code and should be reviewed periodically to ensure accuracy.
-    """)
+    """).strip())
 
     with ref_tab3:
         st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Field Population Logic</span></div>', unsafe_allow_html=True)
@@ -4427,171 +4616,6 @@ This diagram shows how each data attribute is sourced and how they flow into the
     If the live search fails, it retries up to 2 times before falling back to the model's training data.
     When training data is used, a prominent warning is shown and figures are annotated as potentially outdated.
     """)
-
-# ===============================================
-# TAB 5 — ADMIN
-# ===============================================
-with tab5:
-    st.markdown('<div class="fen-breadcrumb">Account Intelligence &rsaquo; <span>Admin</span></div>', unsafe_allow_html=True)
-    st.markdown('<p class="fen-section-title">⚙️ Admin &amp; Permissions</p>', unsafe_allow_html=True)
-
-    # Load config
-    _adm_cfg = _load_admin_config()
-
-    # ── Login prompt ─────────────────────────────────────────────────────
-    if "admin_current_user" not in st.session_state:
-        st.session_state["admin_current_user"] = ""
-
-    _adm_email_input = st.text_input(
-        "Your email address (to identify yourself)",
-        value=st.session_state["admin_current_user"],
-        placeholder="you@example.com",
-        key="admin_email_input",
-    )
-    if _adm_email_input != st.session_state["admin_current_user"]:
-        st.session_state["admin_current_user"] = _adm_email_input.strip().lower()
-        st.rerun()
-
-    _cur_user = st.session_state["admin_current_user"]
-    _cur_is_admin = _is_admin(_cur_user, _adm_cfg)
-
-    if not _cur_user:
-        st.info("Enter your email above to access the admin panel.")
-    elif not _cur_is_admin:
-        st.warning(f"🔒 **{_cur_user}** does not have admin access. Contact an administrator to request access.")
-    else:
-        st.success(f"✅ Logged in as admin: **{_cur_user}**")
-
-        # ── Section: User List ────────────────────────────────────────────
-        st.markdown("### 👥 User Management")
-
-        _users = _adm_cfg.get("users", {})
-        if not _users:
-            st.info("No users configured yet.")
-        else:
-            _user_rows = []
-            for _ue, _ud in _users.items():
-                _user_rows.append({
-                    "Email": _ue,
-                    "Name": _ud.get("name", ""),
-                    "Role": _ud.get("role", "user"),
-                    "Enabled": "✅" if _ud.get("enabled", True) else "❌",
-                    "Single Enrich": "✅" if _ud.get("permissions", {}).get("single_enrichment") else "❌",
-                    "Bulk Enrich":   "✅" if _ud.get("permissions", {}).get("bulk_enrichment") else "❌",
-                    "Lead Match":    "✅" if _ud.get("permissions", {}).get("lead_matching") else "❌",
-                    "Reference":     "✅" if _ud.get("permissions", {}).get("reference") else "❌",
-                    "Added By": _ud.get("added_by", ""),
-                    "Added Date": _ud.get("added_date", ""),
-                })
-            st.dataframe(pd.DataFrame(_user_rows), use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # ── Section: Edit / Toggle User ────────────────────────────────────
-        st.markdown("### ✏️ Edit User Permissions")
-        if _users:
-            _edit_email = st.selectbox("Select user to edit", options=list(_users.keys()), key="adm_edit_sel")
-            if _edit_email:
-                _eu = _users[_edit_email]
-                _ec1, _ec2, _ec3 = st.columns(3)
-                with _ec1:
-                    _new_role    = st.selectbox("Role", ["user", "admin"], index=0 if _eu.get("role","user") == "user" else 1, key="adm_role")
-                    _new_enabled = st.checkbox("Account enabled", value=_eu.get("enabled", True), key="adm_enabled")
-                with _ec2:
-                    _p_single = st.checkbox("Single Enrichment", value=_eu.get("permissions",{}).get("single_enrichment", True), key="adm_p_single")
-                    _p_bulk   = st.checkbox("Bulk Enrichment",   value=_eu.get("permissions",{}).get("bulk_enrichment", True),   key="adm_p_bulk")
-                with _ec3:
-                    _p_lead   = st.checkbox("Lead Matching",     value=_eu.get("permissions",{}).get("lead_matching", True),     key="adm_p_lead")
-                    _p_ref    = st.checkbox("Reference",         value=_eu.get("permissions",{}).get("reference", True),         key="adm_p_ref")
-
-                if st.button("💾 Save Changes", key="adm_save_btn"):
-                    _adm_cfg["users"][_edit_email]["role"] = _new_role
-                    _adm_cfg["users"][_edit_email]["enabled"] = _new_enabled
-                    _adm_cfg["users"][_edit_email]["permissions"] = {
-                        "single_enrichment": _p_single,
-                        "bulk_enrichment":   _p_bulk,
-                        "lead_matching":     _p_lead,
-                        "reference":         _p_ref,
-                        "admin":             _new_role == "admin",
-                    }
-                    if _new_role == "admin" and _edit_email not in _adm_cfg.get("admins", []):
-                        _adm_cfg.setdefault("admins", []).append(_edit_email)
-                    elif _new_role != "admin" and _edit_email in _adm_cfg.get("admins", []):
-                        _adm_cfg["admins"].remove(_edit_email)
-                    _save_admin_config(_adm_cfg)
-                    st.success(f"✅ Permissions updated for {_edit_email}")
-                    st.rerun()
-
-                if st.button("🗑️ Remove User", type="secondary", key="adm_del_btn"):
-                    _adm_cfg["users"].pop(_edit_email, None)
-                    if _edit_email in _adm_cfg.get("admins", []):
-                        _adm_cfg["admins"].remove(_edit_email)
-                    _save_admin_config(_adm_cfg)
-                    st.warning(f"User {_edit_email} removed.")
-                    st.rerun()
-
-        st.divider()
-
-        # ── Section: Add New User ─────────────────────────────────────────
-        st.markdown("### ➕ Add New User")
-        with st.form("adm_add_user_form"):
-            _new_email   = st.text_input("Email *", placeholder="user@company.com")
-            _new_name    = st.text_input("Full Name", placeholder="Jane Smith")
-            _new_role2   = st.selectbox("Role", ["user", "admin"])
-            st.markdown("**Default Permissions**")
-            _c1, _c2 = st.columns(2)
-            with _c1:
-                _np_single = st.checkbox("Single Enrichment", value=True, key="np_single")
-                _np_bulk   = st.checkbox("Bulk Enrichment",   value=True, key="np_bulk")
-            with _c2:
-                _np_lead   = st.checkbox("Lead Matching",     value=True, key="np_lead")
-                _np_ref    = st.checkbox("Reference",         value=True, key="np_ref")
-            _submitted = st.form_submit_button("Add User")
-
-        if _submitted:
-            if not _new_email or "@" not in _new_email:
-                st.error("Please enter a valid email address.")
-            else:
-                _ne = _new_email.strip().lower()
-                if _ne in _adm_cfg.get("users", {}):
-                    st.warning(f"{_ne} already exists. Use 'Edit User Permissions' to modify.")
-                else:
-                    _adm_cfg.setdefault("users", {})[_ne] = {
-                        "name": _new_name.strip(),
-                        "role": _new_role2,
-                        "enabled": True,
-                        "permissions": {
-                            "single_enrichment": _np_single,
-                            "bulk_enrichment":   _np_bulk,
-                            "lead_matching":     _np_lead,
-                            "reference":         _np_ref,
-                            "admin":             _new_role2 == "admin",
-                        },
-                        "added_by":   _cur_user,
-                        "added_date": datetime.now().strftime("%Y-%m-%d"),
-                    }
-                    if _new_role2 == "admin":
-                        _adm_cfg.setdefault("admins", []).append(_ne)
-                    _save_admin_config(_adm_cfg)
-                    st.success(f"✅ User **{_ne}** added successfully.")
-
-                    # Show notification template (no live SMTP configured)
-                    _app_url = (
-                        st.secrets.get("APP_URL", "https://your-app-url.streamlit.app")
-                        if hasattr(st, "secrets") else "https://your-app-url.streamlit.app"
-                    )
-                    st.info(
-                        f"📧 **Email notification to send to {_ne}:**\n\n"
-                        f"Subject: You've been added to Fenergo Account Intelligence\n\n"
-                        f"Hi {_new_name or _ne},\n\n"
-                        f"You have been granted access to the Fenergo Account Intelligence platform.\n"
-                        f"Click the link below to access the tool:\n\n"
-                        f"**{_app_url}**\n\n"
-                        f"Your role: {_new_role2}\n\n"
-                        f"*(To enable automatic email delivery, configure SMTP settings in Streamlit secrets "
-                        f"under `[smtp]` — host, port, username, password.)*"
-                    )
-                    st.rerun()
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown(f"""
