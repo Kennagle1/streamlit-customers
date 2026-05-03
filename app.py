@@ -1102,7 +1102,7 @@ def load_account_category_matrix():
                 if pd.notna(val) and str(val).strip():
                     lookup_v2[(country_clean, col_clean.lower())] = str(val).strip()
                     # Also store a version with hyphens normalized (hyphens → space, extra spaces collapsed)
-                    col_no_hyphen = col_clean.lower().replace('-', ' ').replace('  ', ' ').strip()
+                    col_no_hyphen = re.sub(r'\s+', ' ', col_clean.lower().replace('-', ' ')).strip()
                     if col_no_hyphen != col_clean.lower():
                         lookup_v2[(country_clean, col_no_hyphen)] = str(val).strip()
         if lookup_v2:
@@ -1821,17 +1821,14 @@ def get_account_category(country, business_segment, customer_segment, matrix_loo
         candidates = [
             cs_norm + bs_norm,                           # customer_segment + business_segment
             bs_norm + cs_norm,                           # business_segment + customer_segment (reverse)
-            (cs_norm + bs_norm).replace('-', ' '),       # no hyphens
+            (cs_norm + bs_norm).replace('-', ' '),       # no hyphens (cs + bs)
             (bs_norm + cs_norm).replace('-', ' '),       # reverse, no hyphens
-            (cs_norm + bs_norm).replace('-', ''),        # hyphens removed entirely
+            (cs_norm + bs_norm).replace('-', ''),        # hyphens removed entirely (cs + bs)
             (bs_norm + cs_norm).replace('-', ''),        # reverse, hyphens removed
         ]
-        # Also try singular/plural variants
-        for base in list(candidates):
-            if base.endswith('s'):
-                candidates.append(base[:-1])
-            else:
-                candidates.append(base + 's')
+        # De-duplicate while preserving order
+        _seen = set()
+        candidates = [c for c in candidates if c not in _seen and not _seen.add(c)]
 
         for concat_key in candidates:
             lookup_key = (matched_country, concat_key)
